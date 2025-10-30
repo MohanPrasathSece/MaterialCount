@@ -19,6 +19,7 @@ import { LayoutDashboard, Package, Users, ShoppingCart } from "lucide-react";
 import { usePathname } from "next/navigation";
 // Import the Next.js Image component for optimized image handling.
 import Image from "next/image";
+import { Badge } from "@/components/ui/badge";
 
 // This is the main layout component for the application. It wraps around the page content
 // and provides the consistent sidebar and header structure.
@@ -29,6 +30,18 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   // Determine if the full app layout (with sidebar and header) should be shown.
   // For this app, we only want to hide it on the root landing page ('/').
   const showAppLayout = pathname !== "/";
+
+  // Derive a human-friendly current page label for the header.
+  const currentPageLabel = (() => {
+    if (!pathname) return "";
+    if (pathname === "/dashboard") return "Dashboard";
+    if (pathname.startsWith("/stock")) return "Stock";
+    if (pathname.startsWith("/client-material")) return "Client Material";
+    if (pathname === "/needs-to-buy") return "Needs to Buy";
+    // Fallback to the first path segment capitalized
+    const seg = pathname.split("/").filter(Boolean)[0] || "";
+    return seg ? seg.replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase()) : "";
+  })();
 
   // If we are on a page that shouldn't have the main layout (like the landing page),
   // we simply render the children directly without any of the wrapping layout components.
@@ -56,7 +69,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             {/* Each menu item is a link to a different page. */}
             <SidebarMenuItem>
               {/* 'isActive' prop highlights the link if its path matches the current URL. */}
-              <SidebarMenuButton asChild isActive={pathname === "/dashboard"}>
+              <SidebarMenuButton
+                asChild
+                isActive={pathname === "/dashboard"}
+                className="data-[active=true]:bg-primary data-[active=true]:text-primary-foreground data-[active=true]:shadow data-[active=true]:border data-[active=true]:border-primary"
+              >
                 <a href="/dashboard">
                   <LayoutDashboard />
                   <span>Dashboard</span>
@@ -67,6 +84,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               <SidebarMenuButton
                 asChild
                 isActive={pathname.startsWith("/stock")}
+                className="data-[active=true]:bg-primary data-[active=true]:text-primary-foreground data-[active=true]:shadow data-[active=true]:border data-[active=true]:border-primary"
               >
                 <a href="/stock">
                   <Package />
@@ -78,6 +96,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               <SidebarMenuButton
                 asChild
                 isActive={pathname.startsWith("/client-material")}
+                className="data-[active=true]:bg-primary data-[active=true]:text-primary-foreground data-[active=true]:shadow data-[active=true]:border data-[active=true]:border-primary"
               >
                 <a href="/client-material">
                   <Users />
@@ -89,6 +108,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               <SidebarMenuButton
                 asChild
                 isActive={pathname === "/needs-to-buy"}
+                className="data-[active=true]:bg-primary data-[active=true]:text-primary-foreground data-[active=true]:shadow data-[active=true]:border data-[active=true]:border-primary"
               >
                 <a href="/needs-to-buy">
                   <ShoppingCart />
@@ -116,6 +136,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               </h1>
             </div>
           </div>
+          {/* Explicit current page indicator */}
+          {currentPageLabel ? (
+            <Badge variant="secondary" className="whitespace-nowrap">
+              {currentPageLabel}
+            </Badge>
+          ) : null}
         </header>
         {/* The actual page content ('children') is rendered here. */}
         {children}

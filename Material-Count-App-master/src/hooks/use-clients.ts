@@ -1,8 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { db } from "@/lib/firebase";
-import { collection, onSnapshot, query, orderBy } from "firebase/firestore";
 import type { Client } from "@/lib/types";
 
 export function useClients() {
@@ -10,24 +8,27 @@ export function useClients() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const q = query(collection(db, "clients"), orderBy("name"));
-    const unsubscribe = onSnapshot(
-      q,
-      (querySnapshot) => {
-        const clientsData: Client[] = [];
-        querySnapshot.forEach((doc) => {
-          clientsData.push({ id: doc.id, ...doc.data() } as Client);
-        });
-        setClients(clientsData);
+    const fetchClients = async () => {
+      try {
+        const response = await fetch('/api/clients');
+        if (!response.ok) {
+          throw new Error('Failed to fetch clients');
+        }
+        const data = await response.json();
+        setClients(data);
         setLoading(false);
-      },
-      (error) => {
+      } catch (error) {
         console.error("Error fetching clients:", error);
         setLoading(false);
       }
-    );
+    };
 
-    return () => unsubscribe();
+    fetchClients();
+    
+    // Poll for updates every 5 seconds
+    const interval = setInterval(fetchClients, 5000);
+    
+    return () => clearInterval(interval);
   }, []);
 
   return { clients, loading };

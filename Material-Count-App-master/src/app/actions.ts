@@ -1,4 +1,3 @@
-
 // This directive marks this file as a "Server Action" file.
 // Server Actions are asynchronous functions that are executed on the server.
 // They can be called from client-side components, for example, to handle form submissions.
@@ -8,24 +7,9 @@
 // This is useful when data is updated and you want to show the latest data.
 import { revalidatePath } from "next/cache";
 
-// Import Firestore database instance and functions for database operations.
-import { db } from "@/lib/firebase";
-import {
-  collection, // Reference to a collection
-  addDoc, // Add a new document to a collection
-  doc, // Reference to a document
-  writeBatch, // Perform multiple write operations as a single atomic unit
-  runTransaction, // Execute a transaction
-  getDocs, // Retrieve all documents in a collection
-  query, // Create a query against the collection
-  limit, // Limit the number of documents returned
-  getDoc, // Retrieve a single document
-  deleteDoc,
-  serverTimestamp,
-  Timestamp,
-  collectionGroup,
-  where,
-} from "firebase/firestore";
+// Import MongoDB database instance and functions for database operations.
+import { getDatabase } from "@/lib/mongodb";
+import { ObjectId } from "mongodb";
 
 // Import 'zod' for schema validation. This helps ensure that the data
 // received from forms is in the correct format.
@@ -45,9 +29,8 @@ const materialSchema = z.object({
   // 'quantity' is a number that will be coerced (converted) from a string.
   // It must be an integer and at least 0.
   quantity: z.coerce.number().int().min(0, "Quantity must be a positive number."),
-  category: z.enum(["Wiring", "Fabrication", "Other"], {
-    required_error: "Category is required.",
-  }),
+  // Accept any non-empty category; UI may provide either a selected category or a custom newCategory
+  category: z.string().min(1, "Category is required."),
 });
 
 // This server action is designed to be used with React's 'useActionState' hook.
@@ -55,11 +38,14 @@ const materialSchema = z.object({
 export async function addMaterialAction(prevState: any, formData: FormData) {
   // 'safeParse' validates the form data against the schema.
   // It doesn't throw an error on failure, but returns a success flag and errors.
+  const selectedCategory = String(formData.get("category") || "").trim();
+  const newCategoryRaw = String(formData.get("newCategory") || "").trim();
+  const finalCategory = newCategoryRaw || selectedCategory;
   const validatedFields = materialSchema.safeParse({
     name: formData.get("name"),
     description: formData.get("description"),
     quantity: formData.get("quantity"),
-    category: formData.get("category"),
+    category: finalCategory,
   });
 
   // If validation fails, return detailed error messages.
@@ -70,15 +56,18 @@ export async function addMaterialAction(prevState: any, formData: FormData) {
       success: false,
     };
   }
+
  
+
  
 
   // 'try...catch' block to handle potential errors during database operations.
   try {
-    // 'addDoc' adds a new document to the "materials" collection in Firestore.
-    await addDoc(collection(db, "materials"), {
+    const db = await getDatabase();
+    await db.collection("materials").insertOne({
       ...validatedFields.data,
     });
+    
     // 'revalidatePath' tells Next.js to re-fetch data for these paths on the next request.
     // This ensures the UI is updated with the new material.
     revalidatePath("/");
@@ -92,6 +81,128 @@ export async function addMaterialAction(prevState: any, formData: FormData) {
   }
 }
 
+// FormData-based server action wrapper for client forms
+export async function adjustMaterialQuantityAction(prevState: any, formData: FormData) {
+  const materialId = String(formData.get("materialId") || "");
+  const adjustment = Number(formData.get("adjustment") || 0);
+  const submissionId = Date.now();
+  if (!materialId || !Number.isFinite(adjustment)) {
+    return { success: false, message: "Invalid parameters.", submissionId } as any;
+  }
+  const res = await adjustMaterialQuantity(materialId, adjustment);
+  return { ...res, submissionId } as any;
+}
+
+// Schema for In/Out quantity adjustments
+const stockAdjustmentSchema = z.object({
+  materialId: z.string().min(1, "Material ID is required."),
+  materialName: z.string().min(1, "Material name is required."),
+  quantity: z.coerce.number().int().min(1, "Quantity must be at least 1."),
+  type: z.enum(['in', 'out'], { errorMap: () => ({ message: "Type must be 'in' or 'out'." }) }),
+  reason: z.string().optional(),
+});
+
+// Server action for In/Out quantity adjustments
+export async function stockAdjustmentAction(prevState: any, formData: FormData) {
+  const submissionId = Date.now();
+  
+  const validatedFields = stockAdjustmentSchema.safeParse({
+    materialId: formData.get("materialId"),
+    materialName: formData.get("materialName"),
+    quantity: formData.get("quantity"),
+    type: formData.get("type"),
+    reason: formData.get("reason"),
+  });
+
+  if (!validatedFields.success) {
+    return {
+      success: false,
+      message: "Invalid data submitted.",
+      errors: validatedFields.error.flatten().fieldErrors,
+      submissionId,
+    };
+  }
+
+  const { materialId, materialName, quantity, type, reason } = validatedFields.data;
+
+  try {
+    const db = await getDatabase();
+    
+    // Fetch current material
+    const material = await db.collection('materials').findOne({ _id: new ObjectId(materialId) });
+    
+    if (!material) {
+      return {
+        success: false,
+        message: "Material not found.",
+        submissionId,
+      };
+    }
+
+    const currentStock = material.quantity || 0;
+    
+    // Calculate new stock based on type
+    let newStock: number;
+    let stockChange: number;
+    
+    if (type === 'in') {
+      // In: Add to stock
+      newStock = currentStock + quantity;
+      stockChange = quantity;
+    } else {
+      // Out: Reduce from stock
+      if (quantity > currentStock) {
+        return {
+          success: false,
+          message: `Insufficient stock. Available: ${currentStock}, Requested: ${quantity}`,
+          submissionId,
+        };
+      }
+      newStock = currentStock - quantity;
+      stockChange = -quantity;
+    }
+
+    // Update material stock
+    await db.collection('materials').updateOne(
+      { _id: new ObjectId(materialId) },
+      { $set: { quantity: newStock } }
+    );
+
+    // Record in stock history
+    await db.collection('stock_history').insertOne({
+      materialId,
+      materialName,
+      type,
+      quantity,
+      previousStock: currentStock,
+      newStock,
+      reason: reason || (type === 'in' ? 'Stock Added' : 'Stock Removed'),
+      date: new Date(),
+    });
+
+    // Revalidate paths
+    revalidatePath('/stock');
+    revalidatePath('/dashboard');
+    revalidatePath('/needs-to-buy');
+
+    return {
+      success: true,
+      message: type === 'in' 
+        ? `Added ${quantity} units. New stock: ${newStock}` 
+        : `Removed ${quantity} units. New stock: ${newStock}`,
+      submissionId,
+    };
+
+  } catch (error: any) {
+    console.error("Error adjusting stock:", error);
+    return {
+      success: false,
+      message: "Server error occurred. Please try again.",
+      submissionId,
+    };
+  }
+}
+
 // Server action to delete a material from the database.
 export async function deleteMaterial(materialId: string) {
   // Check if a material ID was provided. This is a basic safeguard.
@@ -99,9 +210,9 @@ export async function deleteMaterial(materialId: string) {
     return { success: false, error: "Material ID is required." };
   }
   try {
-    const materialRef = doc(db, "materials", materialId);
-    // Permanently delete the document.
-    await deleteDoc(materialRef);
+    const db = await getDatabase();
+    await db.collection("materials").deleteOne({ _id: new ObjectId(materialId) });
+    
     // Revalidate paths to reflect the deletion in the UI.
     revalidatePath("/");
     revalidatePath("/stock");
@@ -138,12 +249,15 @@ export async function updateMaterialsPricingAction(prevState: any, formData: For
       return { success: false, message: "No pricing changes provided." };
     }
 
-    const batch = writeBatch(db);
-    for (const u of updates) {
-      const ref = doc(db, "materials", u.id);
-      batch.update(ref, { rate: u.rate, gstPercent: u.gstPercent });
-    }
-    await batch.commit();
+    const db = await getDatabase();
+    const bulkOps = updates.map(u => ({
+      updateOne: {
+        filter: { _id: new ObjectId(u.id) },
+        update: { $set: { rate: u.rate, gstPercent: u.gstPercent } }
+      }
+    }));
+    
+    await db.collection("materials").bulkWrite(bulkOps);
     revalidatePath("/stock/admin");
     return { success: true, message: "Pricing updated." };
   } catch (error) {
@@ -180,13 +294,13 @@ export async function addClientAction(prevState: any, formData: FormData) {
   }
 
   try {
+    const db = await getDatabase();
+    
     // Check if the consumer number already exists
     const consumerNo = validatedFields.data.consumerNo;
-    const clientsRef = collection(db, "clients");
-    const q = query(clientsRef, where("consumerNo", "==", consumerNo));
-    const querySnapshot = await getDocs(q);
+    const existingClient = await db.collection("clients").findOne({ consumerNo });
 
-    if (!querySnapshot.empty) {
+    if (existingClient) {
       return {
         success: false,
         message: "A client with this consumer number already exists.",
@@ -196,9 +310,8 @@ export async function addClientAction(prevState: any, formData: FormData) {
       };
     }
 
-
     // Add a new document to the "clients" collection with the validated data.
-    const docRef = await addDoc(collection(db, "clients"), {
+    const result = await db.collection("clients").insertOne({
       name: validatedFields.data.name,
       address: validatedFields.data.address,
       plantCapacity: validatedFields.data.plantCapacity,
@@ -210,7 +323,7 @@ export async function addClientAction(prevState: any, formData: FormData) {
     
     // Return success status, a message, and the new client's ID.
     // The ID can be be used on the client-side to redirect to the new client's detail page.
-    return { success: true, message: "Client added successfully.", clientId: docRef.id };
+    return { success: true, message: "Client added successfully.", clientId: result.insertedId.toString() };
   } catch (error) {
     // Log the error and return a failure message.
     console.error("Error adding client:", error);
@@ -218,191 +331,25 @@ export async function addClientAction(prevState: any, formData: FormData) {
   }
 }
 
-const materialEntrySheetSchema = z.object({
-    materialId: z.string(),
-    materialName: z.string(),
-    outQty: z.coerce.number().min(0, "Out Qty must be a positive number."),
-    inQty: z.coerce.number().min(0, "In Qty must be a positive number."),
-    originalOut: z.coerce.number(),
-    originalIn: z.coerce.number(),
-});
-
-const updateSheetSchema = z.object({
-    clientId: z.string(),
-    materials: z.array(materialEntrySheetSchema),
-});
-
-
-export async function updateClientSheetAction(prevState: any, formData: FormData) {
-    const materialEntries: Record<string, any> = {};
-    for (const [key, value] of formData.entries()) {
-        const match = key.match(/materials\[(\d+)\]\[(\w+)\]/);
-        if (match) {
-            const [, index, field] = match;
-            if (!materialEntries[index]) {
-                materialEntries[index] = {};
-            }
-            materialEntries[index][field] = value;
-        }
-    }
-
-    const rawData = {
-        clientId: formData.get('clientId'),
-        materials: Object.values(materialEntries),
-    };
-    
-    const validatedFields = updateSheetSchema.safeParse(rawData);
-    
-    if (!validatedFields.success) {
-        return {
-            success: false,
-            message: "Invalid data submitted.",
-            errors: validatedFields.error.flatten().fieldErrors,
-            submissionId: Date.now(),
-        };
-    }
-
-    const { clientId, materials: materialsData } = validatedFields.data;
-    const now = new Date();
-
-    try {
-        const transactionResult = await runTransaction(db, async (transaction) => {
-            const fieldErrors: Record<string, string[]> = {};
-            const outMaterials: { materialId: string; materialName: string; quantity: number; }[] = [];
-            const inMaterials: { materialId: string; materialName: string; quantity: number; }[] = [];
-            const stockUpdates: Map<string, number> = new Map();
-
-            // 1. First, read all material documents to get current stock levels.
-            const materialRefs = materialsData.map(item => doc(db, 'materials', item.materialId));
-            const materialDocs = await Promise.all(materialRefs.map(ref => transaction.get(ref)));
-            const materialStockMap = new Map<string, number>();
-            materialDocs.forEach(doc => {
-                 if (doc.exists()) {
-                    materialStockMap.set(doc.id, doc.data().quantity || 0);
-                }
-            });
-
-            // 2. Process validations and prepare changes.
-            for (const [index, item] of materialsData.entries()) {
-                const newOut = item.outQty - item.originalOut;
-                const newIn = item.inQty - item.originalIn;
-
-                // Validation checks
-                if (newOut < 0) {
-                    fieldErrors[`materials[${index}].outQty`] = [`Out Qty for "${item.materialName}" cannot be decreased.`];
-                }
-                if (newIn < 0) {
-                    fieldErrors[`materials[${index}].inQty`] = [`In Qty for "${item.materialName}" cannot be decreased.`];
-                }
-                if (item.inQty > item.outQty) {
-                    fieldErrors[`materials[${index}].inQty`] = [`In Qty for "${item.materialName}" cannot be greater than Out Qty.`];
-                }
-
-                if (newOut > 0) {
-                    const currentStock = materialStockMap.get(item.materialId) || 0;
-                    if (newOut > currentStock) {
-                        fieldErrors[`materials[${index}].outQty`] = [`Not enough stock for "${item.materialName}". Only ${currentStock} available.`];
-                    }
-                }
-
-                // If no errors for this item so far, prepare writes
-                if (Object.keys(fieldErrors).length === 0) {
-                     if (newOut > 0) {
-                        outMaterials.push({ materialId: item.materialId, materialName: item.materialName, quantity: newOut });
-                    }
-                    if (newIn > 0) {
-                        inMaterials.push({ materialId: item.materialId, materialName: item.materialName, quantity: newIn });
-                    }
-
-                    const stockChange = newIn - newOut;
-                    if (stockChange !== 0) {
-                        const currentUpdate = stockUpdates.get(item.materialId) || 0;
-                        stockUpdates.set(item.materialId, currentUpdate + stockChange);
-                    }
-                }
-            }
-
-            // 3. If any validation errors occurred, return errors and abort.
-            if (Object.keys(fieldErrors).length > 0) {
-                // By returning inside a transaction, we abort it.
-                return { success: false, message: "Please fix the errors before saving.", errors: fieldErrors };
-            }
-            
-            // 4. Perform all write operations.
-            // Create history entries
-            if (outMaterials.length > 0) {
-                const outEntryRef = doc(collection(db, `clients/${clientId}/materialEntries`));
-                transaction.set(outEntryRef, {
-                    clientId, date: Timestamp.fromDate(now), materials: outMaterials,
-                    type: 'out', entryTitle: `Sheet Update - Unloaded`,
-                });
-            }
-            if (inMaterials.length > 0) {
-                const inEntryRef = doc(collection(db, `clients/${clientId}/materialEntries`));
-                transaction.set(inEntryRef, {
-                    clientId, date: Timestamp.fromDate(now), materials: inMaterials,
-                    type: 'in', entryTitle: `Sheet Update - Returned`,
-                });
-            }
-
-            // Update material stock quantities
-            for (const [materialId, stockChange] of stockUpdates.entries()) {
-                const materialRef = doc(db, 'materials', materialId);
-                const currentStock = materialStockMap.get(materialId) || 0;
-                transaction.update(materialRef, { quantity: currentStock + stockChange });
-            }
-
-            return { success: true, message: 'Client sheet updated successfully.' };
-        });
-
-        // 5. If transaction was successful and didn't return errors, revalidate paths.
-        if (transactionResult.success) {
-            revalidatePath(`/client-material/${clientId}`);
-            revalidatePath('/stock');
-            revalidatePath('/dashboard');
-            revalidatePath('/needs-to-buy');
-        }
-        
-        return { ...transactionResult, submissionId: Date.now() };
-
-    } catch (error: any) {
-        console.error("Error updating client sheet:", error);
-        return { success: false, message: "An unexpected server error occurred.", submissionId: Date.now() };
-    }
-}
-
 
 // Server action to seed the database with initial dummy data.
 // This function is designed to be called automatically if the database is found to be empty.
 export async function seedData() {
   try {
+    const db = await getDatabase();
+    
     // First, perform a quick check to see if there's any data in the 'materials' collection.
-    // We only query for one document to be efficient.
-    const materialsQuery = query(collection(db, "materials"), limit(1));
-    const materialsSnap = await getDocs(materialsQuery);
+    const materialsCount = await db.collection("materials").countDocuments({}, { limit: 1 });
 
     // Only proceed to seed if the collection is empty.
-    if (materialsSnap.empty) {
+    if (materialsCount === 0) {
         console.log("Database is empty. Seeding with mock data...");
-        // A 'writeBatch' allows performing multiple write operations as a single atomic unit.
-        // This is much more efficient than sending many individual write requests.
-        const batch = writeBatch(db);
-
-        // Add each mock material from the mock-data file to the batch.
-        mockMaterials.forEach(material => {
-            const docRef = doc(collection(db, "materials")); // Create a new document reference with an auto-generated ID.
-            batch.set(docRef, material); // Add the 'set' operation for this material to the batch.
-        });
-
-        // Add each mock client from the mock-data file to the batch.
-        mockClients.forEach(client => {
-            const docRef = doc(collection(db, "clients"));
-            batch.set(docRef, client);
-        });
-
-        // 'commit' the batch to execute all the write operations together.
-        // This is an all-or-nothing operation.
-        await batch.commit();
+        
+        // Insert mock materials
+        await db.collection("materials").insertMany(mockMaterials);
+        
+        // Insert mock clients
+        await db.collection("clients").insertMany(mockClients);
 
         // Revalidate all relevant paths to make sure the UI shows the new data immediately.
         revalidatePath('/dashboard');
@@ -442,25 +389,28 @@ export async function fillStockAction(prevState: any, formData: FormData) {
     };
   }
 
-  const batch = writeBatch(db);
   const historyItems: { materialId: string; materialName: string; quantityAdded: number }[] = [];
   let totalItemsAdded = 0;
 
   try {
+    const db = await getDatabase();
+    
     for (const materialId in validatedFields.data) {
       const quantityToAdd = validatedFields.data[materialId];
       if (quantityToAdd > 0) {
-        const materialRef = doc(db, "materials", materialId);
-        const materialDoc = await getDoc(materialRef);
+        const material = await db.collection("materials").findOne({ _id: new ObjectId(materialId) });
 
-        if (materialDoc.exists()) {
-          const currentQuantity = materialDoc.data().quantity;
+        if (material) {
+          const currentQuantity = material.quantity;
           const newQuantity = currentQuantity + quantityToAdd;
-          batch.update(materialRef, { quantity: newQuantity });
+          await db.collection("materials").updateOne(
+            { _id: new ObjectId(materialId) },
+            { $set: { quantity: newQuantity } }
+          );
           
           historyItems.push({
             materialId,
-            materialName: materialDoc.data().name,
+            materialName: material.name,
             quantityAdded: quantityToAdd
           });
           totalItemsAdded += quantityToAdd;
@@ -469,15 +419,13 @@ export async function fillStockAction(prevState: any, formData: FormData) {
     }
 
     if (historyItems.length > 0) {
-      const historyRef = doc(collection(db, "stockHistory"));
-      batch.set(historyRef, {
-        timestamp: serverTimestamp(),
+      await db.collection("stockHistory").insertOne({
+        timestamp: new Date(),
         items: historyItems,
         totalItems: totalItemsAdded,
       });
     }
 
-    await batch.commit();
     revalidatePath("/stock");
     revalidatePath("/dashboard");
     revalidatePath("/needs-to-buy");
@@ -490,29 +438,46 @@ export async function fillStockAction(prevState: any, formData: FormData) {
 
 export async function backupData() {
   try {
+    const db = await getDatabase();
     const backupObject: any = {};
 
     // 1. Backup materials
-    const materialsSnap = await getDocs(collection(db, "materials"));
-    backupObject.materials = materialsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    const materials = await db.collection("materials").find({}).toArray();
+    backupObject.materials = materials.map(doc => ({ 
+      id: doc._id.toString(), 
+      ...doc,
+      _id: undefined 
+    }));
 
     // 2. Backup stockHistory
-    const stockHistorySnap = await getDocs(collection(db, "stockHistory"));
-    backupObject.stockHistory = stockHistorySnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    const stockHistory = await db.collection("stockHistory").find({}).toArray();
+    backupObject.stockHistory = stockHistory.map(doc => ({ 
+      id: doc._id.toString(), 
+      ...doc,
+      _id: undefined 
+    }));
 
-    // 3. Backup clients and their subcollections
-    const clientsSnap = await getDocs(collection(db, "clients"));
+    // 3. Backup clients and their material entries
+    const clients = await db.collection("clients").find({}).toArray();
     backupObject.clients = [];
-    for (const clientDoc of clientsSnap.docs) {
-      const clientData = { id: clientDoc.id, ...clientDoc.data() };
-
-      // Backup materialEntries subcollection for each client
-      const materialEntriesSnap = await getDocs(collection(db, "clients", clientDoc.id, "materialEntries"));
-      const materialEntries = materialEntriesSnap.docs.map(entryDoc => ({ id: entryDoc.id, ...entryDoc.data() }));
+    
+    for (const client of clients) {
+      const clientId = client._id.toString();
+      
+      // Get material entries for this client
+      const materialEntries = await db.collection("client_material_entries")
+        .find({ clientId })
+        .toArray();
       
       backupObject.clients.push({
-        ...clientData,
-        materialEntries: materialEntries,
+        id: clientId,
+        ...client,
+        _id: undefined,
+        materialEntries: materialEntries.map(entry => ({
+          id: entry._id.toString(),
+          ...entry,
+          _id: undefined,
+        })),
       });
     }
 
@@ -529,7 +494,6 @@ const backupSchema = z.object({
   stockHistory: z.array(z.any()),
 });
 
-
 export async function restoreData(backup: unknown) {
   const validation = backupSchema.safeParse(backup);
   if (!validation.success) {
@@ -539,57 +503,58 @@ export async function restoreData(backup: unknown) {
   const data = validation.data;
 
   try {
-    // Transaction to delete all old data
-    await runTransaction(db, async (transaction) => {
-      console.log("Deleting old data...");
-      const collectionsToDelete = [
-        collection(db, "materials"),
-        collection(db, "stockHistory"),
-        collection(db, "clients"),
-      ];
-      // Also need to delete all subcollections
-      const allMaterialEntries = await getDocs(collectionGroup(db, 'materialEntries'));
-
-      const deletePromises: Promise<any>[] = [];
-      
-      for (const coll of collectionsToDelete) {
-        const snapshot = await getDocs(coll);
-        snapshot.docs.forEach(doc => transaction.delete(doc.ref));
-      }
-      allMaterialEntries.docs.forEach(doc => transaction.delete(doc.ref));
-      console.log("Old data deletion transaction prepared.");
-    });
-     console.log("Old data deleted successfully.");
-
-    // Batch write to add all new data
-    const batch = writeBatch(db);
+    const db = await getDatabase();
     
+    console.log("Deleting old data...");
+    // Delete all old data
+    await db.collection("materials").deleteMany({});
+    await db.collection("stockHistory").deleteMany({});
+    await db.collection("clients").deleteMany({});
+    await db.collection("client_material_entries").deleteMany({});
+    console.log("Old data deleted successfully.");
+
     console.log("Restoring new data...");
-    (data.materials as Material[]).forEach(material => {
-      const { id, ...rest } = material;
-      batch.set(doc(db, "materials", id), rest);
-    });
-
-    (data.stockHistory as StockHistory[]).forEach(history => {
-        const { id, ...rest } = history;
-        // Convert ISO string back to Firestore Timestamp
-        const timestamp = Timestamp.fromDate(new Date(rest.timestamp as any));
-        batch.set(doc(db, "stockHistory", id), {...rest, timestamp});
-    });
-
-    (data.clients as any[]).forEach(client => {
-      const { id, materialEntries, ...rest } = client;
-      batch.set(doc(db, "clients", id), rest);
-      
-      (materialEntries as ClientMaterialEntry[]).forEach(entry => {
-        const { id: entryId, ...entryRest } = entry;
-         // Convert ISO string back to Firestore Timestamp
-        const date = Timestamp.fromDate(new Date(entryRest.date as any));
-        batch.set(doc(db, `clients/${id}/materialEntries`, entryId), {...entryRest, date});
+    
+    // Restore materials
+    if (data.materials.length > 0) {
+      const materialsToInsert = (data.materials as Material[]).map(material => {
+        const { id, ...rest } = material;
+        return { _id: new ObjectId(id), ...rest };
       });
-    });
+      await db.collection("materials").insertMany(materialsToInsert);
+    }
 
-    await batch.commit();
+    // Restore stock history
+    if (data.stockHistory.length > 0) {
+      const historyToInsert = (data.stockHistory as StockHistory[]).map(history => {
+        const { id, ...rest } = history;
+        return { 
+          _id: new ObjectId(id), 
+          ...rest,
+          timestamp: new Date(rest.timestamp)
+        };
+      });
+      await db.collection("stockHistory").insertMany(historyToInsert);
+    }
+
+    // Restore clients and their material entries
+    for (const client of data.clients as any[]) {
+      const { id, materialEntries, ...rest } = client;
+      await db.collection("clients").insertOne({ _id: new ObjectId(id), ...rest });
+      
+      if (materialEntries && materialEntries.length > 0) {
+        const entriesToInsert = (materialEntries as ClientMaterialEntry[]).map(entry => {
+          const { id: entryId, ...entryRest } = entry;
+          return {
+            _id: new ObjectId(entryId),
+            ...entryRest,
+            date: new Date(entryRest.date as any),
+          };
+        });
+        await db.collection("client_material_entries").insertMany(entriesToInsert);
+      }
+    }
+
     console.log("New data restored successfully.");
 
     revalidatePath("/dashboard");
@@ -604,4 +569,75 @@ export async function restoreData(backup: unknown) {
   }
 }
 
+// Quick stock adjustment actions
+export async function adjustMaterialQuantity(materialId: string, adjustment: number) {
+  try {
+    const db = await getDatabase();
+    const material = await db.collection("materials").findOne({ _id: new ObjectId(materialId) });
     
+    if (!material) {
+      return { success: false, message: "Material not found." };
+    }
+
+    const newQuantity = Math.max(0, material.quantity + adjustment);
+    
+    await db.collection("materials").updateOne(
+      { _id: new ObjectId(materialId) },
+      { $set: { quantity: newQuantity } }
+    );
+
+    // Record in stock history if it's an increase
+    if (adjustment > 0) {
+      await db.collection("stockHistory").insertOne({
+        timestamp: new Date(),
+        items: [{
+          materialId,
+          materialName: material.name,
+          quantityAdded: adjustment
+        }],
+        totalItems: adjustment,
+      });
+    }
+
+    revalidatePath("/stock");
+    revalidatePath("/dashboard");
+    revalidatePath("/needs-to-buy");
+    
+    return { success: true, newQuantity };
+  } catch (error) {
+    console.error("Error adjusting material quantity:", error);
+    return { success: false, message: "Failed to adjust quantity." };
+  }
+}
+
+// Absolute set: material quantity
+export async function setMaterialQuantity(materialId: string, newQuantity: number) {
+  try {
+    const db = await getDatabase();
+    if (!materialId || !Number.isFinite(newQuantity) || newQuantity < 0) {
+      return { success: false, message: "Invalid quantity." };
+    }
+    const material = await db.collection("materials").findOne({ _id: new ObjectId(materialId) });
+    if (!material) return { success: false, message: "Material not found." };
+    await db.collection("materials").updateOne(
+      { _id: new ObjectId(materialId) },
+      { $set: { quantity: Math.floor(newQuantity) } }
+    );
+    revalidatePath("/stock");
+    revalidatePath("/dashboard");
+    revalidatePath("/needs-to-buy");
+    return { success: true };
+  } catch (error) {
+    console.error("Error setting material quantity:", error);
+    return { success: false, message: "Failed to set quantity." };
+  }
+}
+
+// FormData wrapper for absolute set
+export async function setMaterialQuantityAction(prevState: any, formData: FormData) {
+  const materialId = String(formData.get("materialId") || "");
+  const newQuantity = Number(formData.get("newQuantity") || 0);
+  const submissionId = Date.now();
+  const res = await setMaterialQuantity(materialId, newQuantity);
+  return { ...res, submissionId } as any;
+}

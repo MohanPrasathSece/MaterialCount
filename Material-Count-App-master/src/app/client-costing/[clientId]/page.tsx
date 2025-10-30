@@ -1,5 +1,5 @@
-import { doc, getDoc, collection, getDocs, orderBy, query } from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import { getDatabase } from "@/lib/mongodb";
+import { ObjectId } from "mongodb";
 import { notFound } from "next/navigation";
 import type { Client, Material, ClientMaterialEntry } from "@/lib/types";
 import { ClientCosting } from "@/components/clients/ClientCosting";
@@ -8,34 +8,33 @@ import { Button } from "@/components/ui/button";
 import { ArrowLeft } from "lucide-react";
 
 async function getClient(clientId: string) {
-  const ref = doc(db, "clients", clientId);
-  const snap = await getDoc(ref);
-  if (!snap.exists()) return null;
-  return { id: snap.id, ...snap.data() } as Client;
+  try {
+    const db = await getDatabase();
+    const client = await db.collection("clients").findOne({ _id: new ObjectId(clientId) });
+    if (!client) return null;
+    const { _id, ...clientData } = client;
+    return { id: _id.toString(), ...clientData } as Client;
+  } catch (error) {
+    return null;
+  }
 }
 
 async function getMaterials(): Promise<Material[]> {
-  const col = collection(db, "materials");
-  const q = query(col, orderBy("name"));
-  const snap = await getDocs(q);
-  return snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })) as Material[];
-}
-
-async function getClientHistory(clientId: string): Promise<ClientMaterialEntry[]> {
-  const col = collection(db, "clients", clientId, "materialEntries");
-  const q = query(col, orderBy("date", "desc"));
-  const snap = await getDocs(q);
-  return snap.docs.map(d => {
-    const data: any = d.data();
-    return {
-      id: d.id,
-      ...data,
-      date: data.date?.toDate ? data.date.toDate().toISOString() : data.date,
-    } as ClientMaterialEntry;
+  const db = await getDatabase();
+  const materials = await db.collection("materials").find({}).sort({ name: 1 }).toArray();
+  return materials.map(m => {
+    const { _id, ...data } = m;
+    return { id: _id.toString(), ...data } as Material;
   });
 }
 
-export default async function ClientCostingPage({ params }: { params: { clientId: string } }) {
+async function getClientHistory(clientId: string): Promise<ClientMaterialEntry[]> {
+  // In/Out quantity features have been removed
+  // Return empty array for now - costing will show no usage
+  return [];
+}
+
+export default async function ClientCostingPage({ params }: { params: Promise<{ clientId: string }> }) {
   const { clientId } = await params;
   const client = await getClient(clientId);
   if (!client) notFound();

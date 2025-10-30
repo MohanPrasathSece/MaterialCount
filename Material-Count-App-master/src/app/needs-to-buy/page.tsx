@@ -1,9 +1,8 @@
 
 // This file defines the "Needs To Buy" page, which displays materials with low inventory.
 
-// Import Firestore database instance and functions for data fetching.
-import { collection, getDocs, query, where } from "firebase/firestore";
-import { db } from "@/lib/firebase";
+// Import MongoDB database instance and functions for data fetching.
+import { getDatabase } from "@/lib/mongodb";
 // Import UI components from the component library.
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -19,25 +18,20 @@ const LOW_STOCK_THRESHOLD = 10;
 // Asynchronous function to fetch materials that are low in stock from Firestore.
 // This is a server-side data fetching function.
 async function getLowStockMaterials(): Promise<Material[]> {
-  // Create a reference to the "materials" collection in Firestore.
-  const materialsRef = collection(db, "materials");
+  // Get MongoDB database instance
+  const db = await getDatabase();
   
-  // Create a query against the collection.
-  // The 'where' clause filters for documents where the 'quantity' field is less than or equal to our defined threshold.
-  const q = query(
-    materialsRef, 
-    where("quantity", "<=", LOW_STOCK_THRESHOLD)
-  );
+  // Query for materials where quantity is less than or equal to threshold
+  const materials = await db.collection("materials")
+    .find({ quantity: { $lte: LOW_STOCK_THRESHOLD } })
+    .toArray();
   
-  // Execute the query and get a snapshot of the results.
-  const querySnapshot = await getDocs(q);
-  
-  // Map through the documents in the snapshot to create an array of Material objects.
-  // This transforms the raw Firestore document data into the structure defined by our 'Material' type.
-  return querySnapshot.docs.map(doc => {
-      const data = doc.data();
+  // Map through the documents to create an array of Material objects.
+  // This transforms the raw MongoDB document data into the structure defined by our 'Material' type.
+  return materials.map(material => {
+      const { _id, ...data } = material;
       return { 
-        id: doc.id, 
+        id: _id.toString(), 
         ...data,
       } as Material;
   });

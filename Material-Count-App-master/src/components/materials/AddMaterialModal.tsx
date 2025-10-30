@@ -65,6 +65,8 @@ export function AddMaterialModal() {
   // It takes the server action ('addMaterialAction') and the initial state as arguments.
   // It returns the current state and a wrapped action function ('formAction') to be used in the form.
   const [state, formAction] = useActionState(addMaterialAction, initialState);
+  const [categoryMode, setCategoryMode] = useState<"existing" | "new">("existing");
+  const [selectedCategory, setSelectedCategory] = useState<string>("");
 
   // The 'useEffect' hook runs after the component renders and whenever 'state' changes.
   // This is the perfect place to handle the result of the form submission.
@@ -141,21 +143,42 @@ export function AddMaterialModal() {
             {/* Display validation errors for the 'quantity' field, if any. */}
             {state.errors?.quantity && <p className="text-sm text-destructive">{state.errors.quantity[0]}</p>}
           </div>
-           {/* Select field for the material's category. */}
-           <div className="space-y-2">
-                <Label htmlFor="category">Category</Label>
-                <Select name="category" required>
-                    <SelectTrigger id="category">
-                        <SelectValue placeholder="Select a category" />
-                    </SelectTrigger>
-                    <SelectContent>
-                        <SelectItem value="Wiring">Wiring</SelectItem>
-                        <SelectItem value="Fabrication">Fabrication</SelectItem>
-                        <SelectItem value="Other">Other</SelectItem>
-                    </SelectContent>
-                </Select>
-                 {state.errors?.category && <p className="text-sm text-destructive">{state.errors.category[0]}</p>}
+          {/* Category selection or new category creation */}
+          <div className="space-y-2">
+            <Label htmlFor="category">Category</Label>
+            <input type="hidden" name="category" value={categoryMode === "existing" ? selectedCategory : ""} />
+            <div className="grid grid-cols-1 gap-2">
+              <Select
+                value={categoryMode === "existing" ? selectedCategory : "__new__"}
+                onValueChange={(val) => {
+                  if (val === "__new__") {
+                    setCategoryMode("new");
+                    setSelectedCategory("");
+                  } else {
+                    setCategoryMode("existing");
+                    setSelectedCategory(val);
+                  }
+                }}
+              >
+                <SelectTrigger id="category">
+                  <SelectValue placeholder="Select or create a category" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Wiring">Wiring</SelectItem>
+                  <SelectItem value="Fabrication">Fabrication</SelectItem>
+                  <SelectItem value="Other">Other</SelectItem>
+                  <SelectItem value="__new__">Create new…</SelectItem>
+                </SelectContent>
+              </Select>
+              {categoryMode === "new" && (
+                <div className="space-y-1">
+                  <Label htmlFor="newCategory" className="text-muted-foreground">New Category</Label>
+                  <Input id="newCategory" name="newCategory" placeholder="e.g., Hardware" />
+                </div>
+              )}
+              {state.errors?.category && <p className="text-sm text-destructive">{state.errors.category[0]}</p>}
             </div>
+          </div>
           <DialogFooter>
             {/* The 'Cancel' button closes the dialog. */}
             <DialogClose asChild>

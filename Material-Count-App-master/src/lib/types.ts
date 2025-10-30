@@ -2,8 +2,6 @@
 // used throughout the application. Using types helps ensure data consistency
 // and provides better autocompletion and error-checking during development.
 
-import { Timestamp } from "firebase/firestore";
-
 // Defines the structure for a single material in the inventory.
 export type Material = {
   id: string;          // Unique identifier for the material, usually the Firestore document ID.
@@ -43,8 +41,8 @@ export type ClientMaterialEntry = {
     id: string;
     clientId: string;
     // When passing from server to client, this will be an ISO string.
-    // In Firestore, it's a Timestamp.
-    date: Timestamp | string;
+    // In MongoDB, it's a Date.
+    date: Date | string;
     materials: ClientMaterialEntryItem[];
     type: 'in' | 'out';
     entryTitle: string;
@@ -60,7 +58,7 @@ export type StockHistoryItem = {
 
 export type StockHistory = {
     id: string;
-    timestamp: Timestamp;
+    timestamp: Date;
     items: StockHistoryItem[];
     totalItems: number;
 }

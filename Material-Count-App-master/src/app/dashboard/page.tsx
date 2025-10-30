@@ -1,8 +1,7 @@
 // This file defines the main dashboard page of the application.
 
-// Import Firestore database functions for checking data.
-import { collection, getDocs, limit, query } from "firebase/firestore";
-import { db } from "@/lib/firebase";
+// Import MongoDB database functions for checking data.
+import { getDatabase } from "@/lib/mongodb";
 
 // Import server action for seeding data.
 import { seedData } from "@/app/actions";
@@ -28,9 +27,9 @@ export default async function DashboardPage() {
 
   // We perform a check here to see if any data exists in the database.
   // This helps us display a more user-friendly message on the dashboard if it's empty.
-  const materialsQuery = query(collection(db, "materials"), limit(1));
-  const materialsSnap = await getDocs(materialsQuery);
-  const dataExists = !materialsSnap.empty;
+  const db = await getDatabase();
+  const materialsCount = await db.collection("materials").countDocuments({}, { limit: 1 });
+  const dataExists = materialsCount > 0;
 
 
   // If no data exists, we show a welcome message instead of the main dashboard content.

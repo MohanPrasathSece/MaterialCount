@@ -11,7 +11,21 @@ import { Input } from "../ui/input";
 
 function formatTimestamp(timestamp: any) {
     if (!timestamp) return "No date";
-    const date = timestamp.toDate();
+    let date: Date;
+    // Support Date instance, ISO string, number, and fallback objects
+    if (timestamp instanceof Date) {
+        date = timestamp;
+    } else if (typeof timestamp === 'string') {
+        date = new Date(timestamp);
+    } else if (typeof timestamp === 'number') {
+        date = new Date(timestamp);
+    } else if (timestamp && typeof timestamp.toDate === 'function') {
+        // Backward-compat for Firebase Timestamp
+        date = timestamp.toDate();
+    } else {
+        date = new Date(timestamp);
+    }
+    if (isNaN(date.getTime())) return "Invalid date";
     return new Intl.DateTimeFormat('en-US', {
         year: 'numeric',
         month: 'long',

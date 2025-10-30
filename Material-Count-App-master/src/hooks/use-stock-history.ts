@@ -1,8 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { db } from "@/lib/firebase";
-import { collection, onSnapshot, query, orderBy } from "firebase/firestore";
 import type { StockHistory } from "@/lib/types";
 
 export function useStockHistory() {
@@ -10,24 +8,32 @@ export function useStockHistory() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const q = query(collection(db, "stockHistory"), orderBy("timestamp", "desc"));
-    const unsubscribe = onSnapshot(
-      q,
-      (querySnapshot) => {
-        const historyData: StockHistory[] = [];
-        querySnapshot.forEach((doc) => {
-          historyData.push({ id: doc.id, ...doc.data() } as StockHistory);
-        });
-        setHistory(historyData);
+    const fetchHistory = async () => {
+      try {
+        const response = await fetch('/api/stock-history');
+        if (!response.ok) {
+          throw new Error('Failed to fetch stock history');
+        }
+        const data = await response.json();
+        // Convert timestamp strings back to Date objects
+        const formattedData = data.map((item: any) => ({
+          ...item,
+          timestamp: new Date(item.timestamp),
+        }));
+        setHistory(formattedData);
         setLoading(false);
-      },
-      (error) => {
+      } catch (error) {
         console.error("Error fetching stock history:", error);
         setLoading(false);
       }
-    );
+    };
 
-    return () => unsubscribe();
+    fetchHistory();
+    
+    // Poll for updates every 5 seconds
+    const interval = setInterval(fetchHistory, 5000);
+    
+    return () => clearInterval(interval);
   }, []);
 
   return { history, loading };
