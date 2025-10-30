@@ -1,0 +1,15 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "materialEntries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "date",
+          "order": "DESCENDING"
+        }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

@@ -1,0 +1,33 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Allow all operations for development
+    // WARNING: These rules are very permissive and should only be used in development
+    // For production, implement proper authentication and authorization rules
+
+    // Materials collection - read and write access
+    match /materials/{document} {
+      allow read, write: if true;
+    }
+
+    // Stock history collection - read and write access
+    match /stockHistory/{document} {
+      allow read, write: if true;
+    }
+
+    // Clients collection - read and write access
+    match /clients/{document} {
+      allow read, write: if true;
+
+      // Material entries subcollection under clients
+      match /materialEntries/{entry} {
+        allow read, write: if true;
+      }
+    }
+
+    // Allow querying across all collections
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}

@@ -1,0 +1,2 @@
+TO become Owner and delete Items in Stock 
+localStorage.setItem('owner', 'true');
