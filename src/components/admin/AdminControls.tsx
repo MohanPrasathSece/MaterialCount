@@ -4,7 +4,7 @@ import { useState, useRef } from "react";
 import { useOwner } from "@/hooks/use-owner";
 import { Button } from "@/components/ui/button";
 import { Download, Upload, ShieldAlert, DatabaseBackup } from "lucide-react";
-import { backupData, restoreData, normalizeMaterialPricesAction } from "@/app/actions";
+import { backupData, restoreData } from "@/app/actions";
 import { useToast } from "@/hooks/use-toast";
 import {
   Card,
@@ -29,7 +29,7 @@ export function AdminControls() {
   const isOwner = useOwner();
   const [backupLoading, setBackupLoading] = useState(false);
   const [restoreLoading, setRestoreLoading] = useState(false);
-  const [normalizeLoading, setNormalizeLoading] = useState(false);
+  
   const [showRestoreConfirm, setShowRestoreConfirm] = useState(false);
   const [backupFile, setBackupFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -85,16 +85,7 @@ export function AdminControls() {
     setBackupLoading(false);
   };
 
-  const handleNormalizePrices = async () => {
-    setNormalizeLoading(true);
-    const res = await normalizeMaterialPricesAction();
-    if (res?.success) {
-      toast({ title: "Prices Normalized", description: `${res.normalized || 0} materials updated.` });
-    } else {
-      toast({ variant: "destructive", title: "Normalization Failed", description: "Could not normalize prices." });
-    }
-    setNormalizeLoading(false);
-  };
+  
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -212,19 +203,7 @@ export function AdminControls() {
                 </Button>
             </div>
 
-             <Separator />
-
-             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                <div className="flex-1">
-                  <h3 className="font-semibold">Normalize Prices</h3>
-                  <p className="text-sm text-muted-foreground">
-                    Keep only one price per material (piece or meter). Useful if older data has both.
-                  </p>
-                </div>
-                <Button onClick={handleNormalizePrices} disabled={normalizeLoading} className="w-full sm:w-auto shrink-0">
-                  {normalizeLoading ? "Normalizing..." : "Normalize Prices"}
-                </Button>
-              </div>
+             
         </CardContent>
       </Card>
 

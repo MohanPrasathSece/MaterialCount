@@ -11,8 +11,7 @@ export type Material = {
   category?: 'Wiring' | 'Fabrication' | 'Other'; // Category for grouping materials.
   rate?: number;       // Optional per-unit rate for costing.
   gstPercent?: number; // Optional GST percentage for this material.
-  pricePerPiece?: number; // Optional price per piece for this material.
-  pricePerMeter?: number; // Optional price per meter for this material.
+  price?: number;      // Optional unified price for this material.
 };
 
 // Defines the structure for a client.

@@ -6,6 +6,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useOwner } from "@/hooks/use-owner";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
@@ -16,15 +17,15 @@ type Props = {
 };
 
 export function ClientCosting({ client, materials, clientHistory }: Props) {
+  const isOwner = useOwner();
   const initialRateMap = useMemo(() => {
-    const m = new Map<string, { name: string; rate: number; gstPercent: number; pp: number; pm: number }>();
+    const m = new Map<string, { name: string; rate: number; gstPercent: number; price: number }>();
     for (const mat of materials) {
       m.set(mat.id, {
         name: mat.name,
         rate: Number(mat.rate || 0),
         gstPercent: Number(mat.gstPercent || 0),
-        pp: Number((mat as any).pricePerPiece || 0),
-        pm: Number((mat as any).pricePerMeter || 0),
+        price: Number((mat as any).price ?? (mat as any).pricePerPiece ?? (mat as any).pricePerMeter ?? 0),
       });
     }
     return m;
@@ -51,7 +52,7 @@ export function ClientCosting({ client, materials, clientHistory }: Props) {
         if (Number.isFinite(baseIn) && Number.isFinite(gstIn) && Number.isFinite(totalIn)) {
           return { materialId, name, qty, rate: Number(r.rate) || 0, gstPercent, base: baseIn, gst: gstIn, total: totalIn };
         }
-        const unit = (() => { const meta = initialRateMap.get(materialId); return meta ? (meta.pp > 0 ? meta.pp : meta.pm > 0 ? meta.pm : 0) : 0; })();
+        const unit = (() => { const meta = initialRateMap.get(materialId); return meta ? (meta.price > 0 ? meta.price : 0) : 0; })();
         const base = qty * unit;
         const gst = base * (gstPercent / 100);
         const total = base + gst;
@@ -88,7 +89,7 @@ export function ClientCosting({ client, materials, clientHistory }: Props) {
 
   const recalcRow = (materialId: string, r: { qty: number; gstPercent: number }) => {
     const meta = initialRateMap.get(materialId);
-    const unit = meta ? (meta.pp > 0 ? meta.pp : meta.pm > 0 ? meta.pm : 0) : 0;
+    const unit = meta ? (meta.price > 0 ? meta.price : 0) : 0;
     const base = r.qty * unit;
     const gst = base * (r.gstPercent / 100);
     const total = base + gst;
@@ -184,11 +185,13 @@ export function ClientCosting({ client, materials, clientHistory }: Props) {
     <Card>
       <CardHeader className="flex items-center justify-between flex-row">
         <CardTitle className="font-headline">Client Costing</CardTitle>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={downloadPdf}>Download PDF</Button>
-          <Button variant="outline" onClick={recomputeFromUsage} disabled={reloading}>{reloading ? 'Recomputing...' : 'Recompute from usage'}</Button>
-          <Button onClick={save} disabled={saving}>{saving ? 'Saving...' : 'Save'}</Button>
-        </div>
+        {isOwner && (
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={downloadPdf}>Download PDF</Button>
+            <Button variant="outline" onClick={recomputeFromUsage} disabled={reloading}>{reloading ? 'Recomputing...' : 'Recompute from usage'}</Button>
+            <Button onClick={save} disabled={saving}>{saving ? 'Saving...' : 'Save'}</Button>
+          </div>
+        )}
       </CardHeader>
       <CardContent>
         <div className="w-full overflow-x-auto border rounded-lg">
@@ -214,16 +217,11 @@ export function ClientCosting({ client, materials, clientHistory }: Props) {
                 </TableRow>
               ) : (
                 rows.map((r, idx) => {
-                  const meta = initialRateMap.get(r.materialId);
-                  const source = meta && meta.pp > 0 ? "Pc" : meta && meta.pm > 0 ? "m" : "-";
                   return (
                   <TableRow key={r.materialId + idx}>
                     <TableCell className="font-medium">
                       <div className="flex items-center gap-2">
                         <span>{r.name}</span>
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground border">
-                          {source}
-                        </span>
                       </div>
                     </TableCell>
                     <TableCell className="text-center">

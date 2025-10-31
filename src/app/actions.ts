@@ -31,9 +31,8 @@ const materialSchema = z.object({
   quantity: z.coerce.number().int().min(0, "Quantity must be a positive number."),
   // Accept any non-empty category; UI may provide either a selected category or a custom newCategory
   category: z.string().min(1, "Category is required."),
-  // Optional prices
-  pricePerPiece: z.coerce.number().min(0).optional(),
-  pricePerMeter: z.coerce.number().min(0).optional(),
+  // Optional price (treat empty string as undefined to avoid saving 0 by mistake)
+  price: z.preprocess((v) => (v === '' ? undefined : v), z.coerce.number().min(0)).optional(),
 });
 
 // This server action is designed to be used with React's 'useActionState' hook.
@@ -49,8 +48,7 @@ export async function addMaterialAction(prevState: any, formData: FormData) {
     description: formData.get("description"),
     quantity: formData.get("quantity"),
     category: finalCategory,
-    pricePerPiece: formData.get("pricePerPiece"),
-    pricePerMeter: formData.get("pricePerMeter"),
+    price: formData.get("price"),
   });
 
   // If validation fails, return detailed error messages.
@@ -64,17 +62,14 @@ export async function addMaterialAction(prevState: any, formData: FormData) {
   // 'try...catch' block to handle potential errors during database operations.
   try {
     const db = await getDatabase();
-    const { pricePerPiece = undefined, pricePerMeter = undefined, ...rest } = validatedFields.data as any;
-    const pc = Number(pricePerPiece ?? 0) || 0;
-    const pm = Number(pricePerMeter ?? 0) || 0;
+    const { price = undefined, ...rest } = validatedFields.data as any;
+    const p = Number(price ?? 0) || 0;
     const doc: Record<string, any> = { ...rest };
-    if (pc > 0 && pm > 0) {
-      // Prefer per-piece if both provided
-      doc.pricePerPiece = pc;
-    } else if (pc > 0) {
-      doc.pricePerPiece = pc;
-    } else if (pm > 0) {
-      doc.pricePerMeter = pm;
+    if (p > 0) {
+      doc.price = p;
+      // Clean legacy fields if any
+      doc.pricePerPiece = undefined;
+      doc.pricePerMeter = undefined;
     }
     await db.collection("materials").insertOne(doc);
     
@@ -92,20 +87,21 @@ export async function addMaterialAction(prevState: any, formData: FormData) {
 
 }
 
-// Optional: normalize existing materials to keep only one of pricePerPiece/pricePerMeter when both > 0
+// Optional: normalize existing materials to set unified price from legacy fields if needed
 export async function normalizeMaterialPricesAction() {
   try {
     const db = await getDatabase();
     const mats = await db.collection("materials").find({}).toArray();
     const ops: any[] = [];
     for (const m of mats) {
+      const p = Number(m.price ?? 0) || 0;
       const pc = Number(m.pricePerPiece ?? 0) || 0;
       const pm = Number(m.pricePerMeter ?? 0) || 0;
-      if (pc > 0 && pm > 0) {
+      if (p === 0 && (pc > 0 || pm > 0)) {
         ops.push({
           updateOne: {
             filter: { _id: m._id },
-            update: { $unset: { pricePerMeter: "" } },
+            update: { $set: { price: pc > 0 ? pc : pm }, $unset: { pricePerPiece: "", pricePerMeter: "" } },
           },
         });
       }
@@ -135,29 +131,37 @@ export async function adjustMaterialQuantityAction(prevState: any, formData: For
 // Schema for In/Out quantity adjustments
 const stockAdjustmentSchema = z.object({
   materialId: z.string().min(1, "Material ID is required."),
-  materialName: z.string().min(1, "Material name is required."),
+  materialName: z.string().optional(),
   quantity: z.coerce.number().int().min(1, "Quantity must be at least 1."),
   type: z.enum(['in', 'out'], { errorMap: () => ({ message: "Type must be 'in' or 'out'." }) }),
-  reason: z.string().optional(),
+  // Accept missing or null reason
+  reason: z.string().optional().nullable(),
 });
 
 const clientStockAdjustmentSchema = stockAdjustmentSchema.extend({
   clientId: z.string().min(1, "Client ID is required."),
+  // Ensure reason remains optional even if absent/null in client forms
+  reason: z.string().optional().nullable(),
 });
 
 // Server action for In/Out quantity adjustments
 export async function stockAdjustmentAction(prevState: any, formData: FormData) {
   const submissionId = Date.now();
   
-  const validatedFields = stockAdjustmentSchema.safeParse({
+  const data = {
     materialId: formData.get("materialId"),
     materialName: formData.get("materialName"),
     quantity: formData.get("quantity"),
     type: formData.get("type"),
     reason: formData.get("reason"),
-  });
+  };
+  
+  console.log("stockAdjustmentAction received:", data);
+  
+  const validatedFields = stockAdjustmentSchema.safeParse(data);
 
   if (!validatedFields.success) {
+    console.error("Validation failed:", validatedFields.error.flatten().fieldErrors);
     return {
       success: false,
       message: "Invalid data submitted.",
@@ -214,7 +218,7 @@ export async function stockAdjustmentAction(prevState: any, formData: FormData) 
     // Record in stock history
     await db.collection('stockHistory').insertOne({
       materialId,
-      materialName,
+      materialName: materialName || (material as any).name || '',
       type,
       quantity,
       previousStock: currentStock,
@@ -271,10 +275,10 @@ export async function deleteMaterial(materialId: string) {
 // Batch update material pricing (rate, gstPercent)
 export async function updateMaterialsPricingAction(prevState: any, formData: FormData) {
   try {
-    const updates: { id: string; rate: number; gstPercent: number; pricePerPiece?: number; pricePerMeter?: number }[] = [];
+    const updates: { id: string; rate: number; gstPercent: number; price?: number }[] = [];
     const temp: Record<string, any> = {};
     for (const [key, value] of formData.entries()) {
-      const match = key.match(/^pricing\[(.+)\]\[(rate|gstPercent|pricePerPiece|pricePerMeter)\]$/);
+      const match = key.match(/^pricing\[(.+)\]\[(rate|gstPercent|price)\]$/);
       if (match) {
         const [, id, field] = match;
         if (!temp[id]) temp[id] = {};
@@ -285,9 +289,8 @@ export async function updateMaterialsPricingAction(prevState: any, formData: For
     for (const id of Object.keys(temp)) {
       const rate = Number(temp[id].rate ?? 0) || 0;
       const gstPercent = Number(temp[id].gstPercent ?? 0) || 0;
-      const pricePerPiece = temp[id].pricePerPiece !== undefined ? Number(temp[id].pricePerPiece) || 0 : undefined;
-      const pricePerMeter = temp[id].pricePerMeter !== undefined ? Number(temp[id].pricePerMeter) || 0 : undefined;
-      updates.push({ id, rate, gstPercent, pricePerPiece, pricePerMeter });
+      const price = temp[id].price !== undefined ? (Number(temp[id].price) || 0) : undefined;
+      updates.push({ id, rate, gstPercent, price });
     }
 
     if (updates.length === 0) {
@@ -298,17 +301,10 @@ export async function updateMaterialsPricingAction(prevState: any, formData: For
     const bulkOps = updates.map(u => {
       const $set: Record<string, any> = { rate: u.rate, gstPercent: u.gstPercent };
       const $unset: Record<string, any> = {};
-      const hasPc = u.pricePerPiece !== undefined;
-      const hasPm = u.pricePerMeter !== undefined;
-      const pc = Number(u.pricePerPiece ?? 0) || 0;
-      const pm = Number(u.pricePerMeter ?? 0) || 0;
-      if (hasPc) {
-        $set.pricePerPiece = pc;
-        if (pc > 0) $unset.pricePerMeter = "";
-      }
-      if (hasPm) {
-        $set.pricePerMeter = pm;
-        if (pm > 0) $unset.pricePerPiece = "";
+      if (u.price !== undefined) {
+        $set.price = Number(u.price) || 0;
+        $unset.pricePerPiece = "";
+        $unset.pricePerMeter = "";
       }
       const update: Record<string, any> = {};
       if (Object.keys($set).length) update.$set = $set;
@@ -709,22 +705,19 @@ export async function setMaterialQuantityAction(prevState: any, formData: FormDa
 // Pricing: single material price setters
 const materialPriceSchema = z.object({
   materialId: z.string().min(1),
-  pricePerPiece: z.coerce.number().min(0).optional(),
-  pricePerMeter: z.coerce.number().min(0).optional(),
+  // Treat empty string as undefined to prevent unintended 0 writes while typing
+  price: z.preprocess((v) => (v === '' ? undefined : v), z.coerce.number().min(0)).optional(),
 });
 
-export async function setMaterialPrices(materialId: string, pricePerPiece?: number, pricePerMeter?: number) {
+export async function setMaterialPrices(materialId: string, price?: number) {
   try {
     const db = await getDatabase();
     const setUpdate: Record<string, any> = {};
     const unsetUpdate: Record<string, any> = {};
-    if (pricePerPiece !== undefined && Number.isFinite(pricePerPiece)) {
-      setUpdate.pricePerPiece = pricePerPiece;
-      if (pricePerPiece > 0) unsetUpdate.pricePerMeter = "";
-    }
-    if (pricePerMeter !== undefined && Number.isFinite(pricePerMeter)) {
-      setUpdate.pricePerMeter = pricePerMeter;
-      if (pricePerMeter > 0) unsetUpdate.pricePerPiece = "";
+    if (price !== undefined && Number.isFinite(price) && price > 0) {
+      setUpdate.price = price;
+      unsetUpdate.pricePerPiece = "";
+      unsetUpdate.pricePerMeter = "";
     }
     if (Object.keys(setUpdate).length === 0 && Object.keys(unsetUpdate).length === 0) {
       return { success: false, message: "No price fields provided." };
@@ -733,8 +726,7 @@ export async function setMaterialPrices(materialId: string, pricePerPiece?: numb
       { _id: new ObjectId(materialId) },
       { ...(Object.keys(setUpdate).length ? { $set: setUpdate } : {}), ...(Object.keys(unsetUpdate).length ? { $unset: unsetUpdate } : {}) }
     );
-    // Avoid revalidating /stock here to prevent input resets while typing
-    revalidatePath("/stock/admin");
+    // Avoid revalidating paths here to prevent input resets while typing
     return { success: true };
   } catch (error) {
     console.error("Error setting material prices:", error);
@@ -746,29 +738,35 @@ export async function setMaterialPricesAction(prevState: any, formData: FormData
   const submissionId = Date.now();
   const validated = materialPriceSchema.safeParse({
     materialId: formData.get("materialId"),
-    pricePerPiece: formData.get("pricePerPiece"),
-    pricePerMeter: formData.get("pricePerMeter"),
+    price: formData.get("price"),
   });
   if (!validated.success) {
     return { success: false, message: "Invalid price data.", submissionId } as any;
   }
-  const { materialId, pricePerPiece, pricePerMeter } = validated.data as any;
-  const res = await setMaterialPrices(materialId, pricePerPiece, pricePerMeter);
+  const { materialId, price } = validated.data as any;
+  const res = await setMaterialPrices(materialId, price);
   return { ...res, submissionId } as any;
 }
 
 // Client-specific In/Out that also updates client usage and costing
 export async function clientStockAdjustmentAction(prevState: any, formData: FormData) {
   const submissionId = Date.now();
-  const validated = clientStockAdjustmentSchema.safeParse({
+  
+  const data = {
     clientId: formData.get("clientId"),
     materialId: formData.get("materialId"),
     materialName: formData.get("materialName"),
     quantity: formData.get("quantity"),
     type: formData.get("type"),
     reason: formData.get("reason"),
-  });
+  };
+  
+  console.log("clientStockAdjustmentAction received:", data);
+  
+  const validated = clientStockAdjustmentSchema.safeParse(data);
+  
   if (!validated.success) {
+    console.error("Client validation failed:", validated.error.flatten().fieldErrors);
     return {
       success: false,
       message: "Invalid data submitted.",
@@ -780,6 +778,40 @@ export async function clientStockAdjustmentAction(prevState: any, formData: Form
 
   try {
     const db = await getDatabase();
+    
+    // For IN type, validate that IN quantity doesn't exceed OUT quantity
+    if (type === 'in') {
+      const entries = await db.collection('client_material_entries').find({ clientId }).toArray();
+      let totalOut = 0;
+      let totalIn = 0;
+      
+      for (const entry of entries as any[]) {
+        const entryType = String(entry.type || 'out');
+        const items: any[] = Array.isArray(entry.materials) ? entry.materials : [];
+        
+        for (const item of items) {
+          const itemMaterialId = String(item.materialId || '');
+          if (itemMaterialId === materialId) {
+            const qty = Number(item.quantity) || 0;
+            if (entryType === 'out') {
+              totalOut += qty;
+            } else if (entryType === 'in') {
+              totalIn += qty;
+            }
+          }
+        }
+      }
+      
+      const maxAllowedIn = totalOut - totalIn;
+      if (quantity > maxAllowedIn) {
+        return { 
+          success: false, 
+          message: `Cannot return more than taken. Max returnable: ${maxAllowedIn} (OUT: ${totalOut}, IN: ${totalIn})`, 
+          submissionId 
+        };
+      }
+    }
+    
     // Adjust global stock same as normal action
     const material = await db.collection('materials').findOne({ _id: new ObjectId(materialId) });
     if (!material) {
@@ -835,10 +867,11 @@ export async function clientStockAdjustmentAction(prevState: any, formData: Form
         const key = String(u.name || '').toLowerCase();
         if (key && byName[key]) m = byName[key];
       }
+      const p = Number(m?.price ?? 0) || 0;
       const pp = Number(m?.pricePerPiece ?? 0) || 0;
       const pm = Number(m?.pricePerMeter ?? 0) || 0;
       const r = Number(m?.rate ?? 0) || 0;
-      const unitPrice = pp > 0 ? pp : pm > 0 ? pm : r > 0 ? r : 0;
+      const unitPrice = p > 0 ? p : pp > 0 ? pp : pm > 0 ? pm : r > 0 ? r : 0;
       const gstPercent = Number(m.gstPercent) || 0;
       const base = qty * unitPrice;
       const gst = base * (gstPercent / 100);
@@ -856,6 +889,8 @@ export async function clientStockAdjustmentAction(prevState: any, formData: Form
 
     // Revalidate
     revalidatePath(`/client-costing/${clientId}`);
+    revalidatePath(`/client-material`);
+    revalidatePath(`/client-material/${clientId}`);
     revalidatePath(`/client-material/${clientId}`);
     revalidatePath('/stock');
     return {

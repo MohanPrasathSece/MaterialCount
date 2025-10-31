@@ -7,14 +7,12 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Package } from "lucide-react";
 import { StockHistory } from "@/components/materials/StockHistory";
 import { Separator } from "@/components/ui/separator";
-import { AdminControls } from "@/components/admin/AdminControls";
 
 // This is the main React component for the Stock page.
 export default function StockPage() {
   return (
     // Add padding around the main content area.
     <div className="p-4 md:p-8 lg:p-10 space-y-8">
-      <AdminControls />
       <Card>
         <CardHeader className="flex flex-row items-center gap-2">
           <Package className="w-6 h-6" />

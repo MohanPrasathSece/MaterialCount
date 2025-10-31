@@ -3,9 +3,11 @@
 
 // Import Next.js's Link component for client-side navigation.
 import Link from "next/link";
+import { useEffect, useState } from "react";
 // Import UI components from ShadCN.
 import { Card, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
 // Import the TypeScript type definition for a Client.
 import type { Client } from "@/lib/types";
 
@@ -19,6 +21,23 @@ export function ClientCard({ client }: ClientCardProps) {
   // Generate initials from the client's name to use as a fallback for the avatar.
   // This splits the name by spaces, takes the first character of each part, and joins them.
   const initials = client.name.split(' ').map(n => n[0]).join('');
+  const [netQty, setNetQty] = useState<number | null>(null);
+
+  useEffect(() => {
+    // Fetch client material entries to calculate net used quantity
+    const fetchNetQty = async () => {
+      try {
+        const res = await fetch(`/api/clients/${client.id}/net-quantity`);
+        if (res.ok) {
+          const data = await res.json();
+          setNetQty(data.netQuantity || 0);
+        }
+      } catch (error) {
+        console.error("Error fetching net quantity:", error);
+      }
+    };
+    fetchNetQty();
+  }, [client.id]);
 
   // The entire card is wrapped in a Link component.
   // Clicking anywhere on the card will navigate to the client's detail page.
@@ -34,8 +53,13 @@ export function ClientCard({ client }: ClientCardProps) {
                     {/* If there's no avatar URL or it fails to load, the AvatarFallback with initials is shown. */}
                     <AvatarFallback>{initials}</AvatarFallback>
                 </Avatar>
-                <div>
+                <div className="flex-1">
                     <CardTitle className="text-lg font-headline">{client.name}</CardTitle>
+                    {netQty !== null && (
+                      <CardDescription className="mt-1">
+                        Net Used: <Badge variant="secondary" className="ml-1">{netQty}</Badge>
+                      </CardDescription>
+                    )}
                 </div>
             </CardHeader>
         </Card>

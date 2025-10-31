@@ -15,6 +15,8 @@ import type { Material } from "@/lib/types";
 type StockAdjustmentModalProps = {
   material: Material;
   clientId?: string;
+  currentOutQty?: number;
+  currentInQty?: number;
 };
 
 const initialState = {
@@ -24,7 +26,7 @@ const initialState = {
   submissionId: 0,
 };
 
-export function StockAdjustmentModal({ material, clientId }: StockAdjustmentModalProps) {
+export function StockAdjustmentModal({ material, clientId, currentOutQty = 0, currentInQty = 0 }: StockAdjustmentModalProps) {
   const [open, setOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"in" | "out">("in");
   const [quantity, setQuantity] = useState("1");
@@ -33,6 +35,9 @@ export function StockAdjustmentModal({ material, clientId }: StockAdjustmentModa
   
   const [state, formAction] = useActionState((clientId ? clientStockAdjustmentAction : stockAdjustmentAction) as any, initialState as any);
   const [lastSubmissionId, setLastSubmissionId] = useState(0);
+  
+  // Calculate max IN quantity for client (cannot exceed OUT quantity)
+  const maxInQty = clientId ? Math.max(0, currentOutQty - currentInQty) : Infinity;
 
   useEffect(() => {
     if (state.submissionId && state.submissionId !== lastSubmissionId) {
@@ -48,10 +53,15 @@ export function StockAdjustmentModal({ material, clientId }: StockAdjustmentModa
         setReason("");
         setOpen(false);
       } else if (state.message) {
+        const fieldErr = state.errors?.quantity?.[0]
+          || state.errors?.type?.[0]
+          || state.errors?.materialId?.[0]
+          || state.errors?.materialName?.[0]
+          || state.message;
         toast({
           variant: "destructive",
           title: "Error",
-          description: state.message,
+          description: fieldErr,
         });
       }
     }
@@ -80,15 +90,20 @@ export function StockAdjustmentModal({ material, clientId }: StockAdjustmentModa
           </DialogDescription>
         </DialogHeader>
 
-        {activeTab === "in" ? (
-          <div className="mb-2 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800">
-            Mode: IN – Adding to stock
-          </div>
-        ) : (
-          <div className="mb-2 rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-sm text-orange-800">
-            Mode: OUT – Removing from stock
+        {clientId && (
+          <div className="mb-2 text-xs sm:text-sm rounded-md border px-3 py-2 bg-muted/30 flex flex-col gap-1">
+            <div className="flex items-center justify-between">
+              <span>Client Out: <strong>{currentOutQty}</strong></span>
+              <span>Client In: <strong>{currentInQty}</strong></span>
+              <span>Net: <strong>{Math.max(0, currentOutQty - currentInQty)}</strong></span>
+            </div>
+            <div className="text-muted-foreground">
+              Max returnable now: <strong>{Math.max(0, currentOutQty - currentInQty)}</strong>
+            </div>
           </div>
         )}
+
+        
 
         <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "in" | "out")} className="w-full">
           <TabsList className="grid w-full grid-cols-2">
@@ -110,44 +125,42 @@ export function StockAdjustmentModal({ material, clientId }: StockAdjustmentModa
               <input type="hidden" name="type" value="in" />
 
               <div className="space-y-2">
-                <Label htmlFor="quantity-in">Quantity to Add</Label>
+                <Label htmlFor="quantity-in">Quantity</Label>
                 <Input
                   id="quantity-in"
                   name="quantity"
                   type="number"
                   min="1"
+                  max={clientId ? maxInQty : undefined}
                   step="1"
+                  inputMode="numeric"
+                  pattern="\\d*"
                   value={quantity}
-                  onChange={(e) => setQuantity(e.target.value)}
+                  onChange={(e) => {
+                    const v = (e.target.value || '').replace(/[^0-9]/g, '');
+                    setQuantity(v);
+                  }}
+                  onKeyDown={(e) => { if (e.key === 'e' || e.key === 'E' || e.key === '-' || e.key === '+' || e.key === '.' || e.key === ',') e.preventDefault(); }}
                   placeholder="Enter quantity"
                   required
+                  disabled={clientId && maxInQty === 0}
                 />
                 {state.errors?.quantity && (
                   <p className="text-sm text-destructive">{state.errors.quantity[0]}</p>
                 )}
+                {clientId && Number(quantity || 0) > maxInQty && (
+                  <p className="text-sm text-destructive">⚠ Cannot return more than what was taken out!</p>
+                )}
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="reason-in">Reason (Optional)</Label>
-                <Textarea
-                  id="reason-in"
-                  name="reason"
-                  value={reason}
-                  onChange={(e) => setReason(e.target.value)}
-                  placeholder="e.g., New purchase, Supplier delivery"
-                  rows={3}
-                />
-              </div>
-
-              <div className="bg-green-50 dark:bg-green-950 p-3 rounded-md border border-green-200 dark:border-green-800">
-                <p className="text-sm text-green-800 dark:text-green-200">
-                  <strong>New Stock:</strong> {material.quantity} + {quantity || 0} = <strong>{material.quantity + Number(quantity || 0)}</strong>
-                </p>
-              </div>
-
-              <Button type="submit" className="w-full" size="lg">
+              <Button 
+                type="submit" 
+                className="w-full" 
+                size="lg"
+                disabled={(Number(quantity || 0) < 1) || (clientId && (maxInQty === 0 || Number(quantity || 0) > maxInQty))}
+              >
                 <Plus className="w-4 h-4 mr-2" />
-                Add to Stock
+                {clientId ? "Return to Stock" : "Add to Stock"}
               </Button>
             </form>
           </TabsContent>
@@ -160,7 +173,7 @@ export function StockAdjustmentModal({ material, clientId }: StockAdjustmentModa
               <input type="hidden" name="type" value="out" />
 
               <div className="space-y-2">
-                <Label htmlFor="quantity-out">Quantity to Remove</Label>
+                <Label htmlFor="quantity-out">Quantity</Label>
                 <Input
                   id="quantity-out"
                   name="quantity"
@@ -168,8 +181,14 @@ export function StockAdjustmentModal({ material, clientId }: StockAdjustmentModa
                   min="1"
                   max={material.quantity}
                   step="1"
+                  inputMode="numeric"
+                  pattern="\\d*"
                   value={quantity}
-                  onChange={(e) => setQuantity(e.target.value)}
+                  onChange={(e) => {
+                    const v = (e.target.value || '').replace(/[^0-9]/g, '');
+                    setQuantity(v);
+                  }}
+                  onKeyDown={(e) => { if (e.key === 'e' || e.key === 'E' || e.key === '-' || e.key === '+' || e.key === '.' || e.key === ',') e.preventDefault(); }}
                   placeholder="Enter quantity"
                   required
                 />
@@ -177,34 +196,16 @@ export function StockAdjustmentModal({ material, clientId }: StockAdjustmentModa
                   <p className="text-sm text-destructive">{state.errors.quantity[0]}</p>
                 )}
               </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="reason-out">Reason (Optional)</Label>
-                <Textarea
-                  id="reason-out"
-                  name="reason"
-                  value={reason}
-                  onChange={(e) => setReason(e.target.value)}
-                  placeholder="e.g., Client dispatch, Damaged goods"
-                  rows={3}
-                />
-              </div>
-
-              <div className="bg-orange-50 dark:bg-orange-950 p-3 rounded-md border border-orange-200 dark:border-orange-800">
-                <p className="text-sm text-orange-800 dark:text-orange-200">
-                  <strong>New Stock:</strong> {material.quantity} - {quantity || 0} = <strong>{Math.max(0, material.quantity - Number(quantity || 0))}</strong>
-                </p>
-                {Number(quantity || 0) > material.quantity && (
-                  <p className="text-sm text-destructive mt-1">⚠ Insufficient stock!</p>
-                )}
-              </div>
+              {Number(quantity || 0) > material.quantity && (
+                <p className="text-sm text-destructive">⚠ Insufficient stock!</p>
+              )}
 
               <Button 
                 type="submit" 
                 className="w-full" 
                 size="lg"
                 variant="destructive"
-                disabled={Number(quantity || 0) > material.quantity}
+                disabled={(Number(quantity || 0) < 1) || (Number(quantity || 0) > material.quantity)}
               >
                 <Minus className="w-4 h-4 mr-2" />
                 Remove from Stock

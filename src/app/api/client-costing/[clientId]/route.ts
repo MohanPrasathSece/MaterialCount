@@ -66,10 +66,7 @@ export async function GET(
           const key = String(usage.name || '').toLowerCase();
           if (key && materialsByName[key]) mat = materialsByName[key];
         }
-        let unitPrice = 0;
-        const pp = Number(mat?.pricePerPiece ?? 0) || 0;
-        const pm = Number(mat?.pricePerMeter ?? 0) || 0;
-        unitPrice = pp > 0 ? pp : pm > 0 ? pm : 0;
+        const unitPrice = Number(mat?.price ?? mat?.pricePerPiece ?? mat?.pricePerMeter ?? 0) || 0;
         const gstPercent = Number(mat.gstPercent) || 0;
         const base = qty * unitPrice;
         const gst = base * (gstPercent / 100);
