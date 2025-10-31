@@ -82,7 +82,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ c
             <Separator />
 
             {/* Client-specific view of materials with In/Out controls */}
-            <ClientMaterialStock />
+            <ClientMaterialStock clientId={clientId} />
         </div>
     );
 }

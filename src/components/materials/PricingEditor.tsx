@@ -29,12 +29,14 @@ export function PricingEditor() {
                   <TableHead>Material</TableHead>
                   <TableHead className="text-center">Rate</TableHead>
                   <TableHead className="text-center">GST %</TableHead>
+                  <TableHead className="text-center">Price/Piece</TableHead>
+                  <TableHead className="text-center">Price/Meter</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {materials.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={3} className="text-center text-muted-foreground">No materials found.</TableCell>
+                    <TableCell colSpan={5} className="text-center text-muted-foreground">No materials found.</TableCell>
                   </TableRow>
                 ) : (
                   materials.map(m => (
@@ -60,6 +62,28 @@ export function PricingEditor() {
                           step={1}
                           inputMode="numeric"
                           className="w-24 mx-auto text-center"
+                        />
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <Input
+                          name={`pricing[${m.id}][pricePerPiece]`}
+                          type="number"
+                          defaultValue={m.pricePerPiece ?? 0}
+                          min={0}
+                          step={0.01}
+                          inputMode="decimal"
+                          className="w-32 mx-auto text-center"
+                        />
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <Input
+                          name={`pricing[${m.id}][pricePerMeter]`}
+                          type="number"
+                          defaultValue={m.pricePerMeter ?? 0}
+                          min={0}
+                          step={0.01}
+                          inputMode="decimal"
+                          className="w-32 mx-auto text-center"
                         />
                       </TableCell>
                     </TableRow>

@@ -31,6 +31,9 @@ const materialSchema = z.object({
   quantity: z.coerce.number().int().min(0, "Quantity must be a positive number."),
   // Accept any non-empty category; UI may provide either a selected category or a custom newCategory
   category: z.string().min(1, "Category is required."),
+  // Optional prices
+  pricePerPiece: z.coerce.number().min(0).optional(),
+  pricePerMeter: z.coerce.number().min(0).optional(),
 });
 
 // This server action is designed to be used with React's 'useActionState' hook.
@@ -46,6 +49,8 @@ export async function addMaterialAction(prevState: any, formData: FormData) {
     description: formData.get("description"),
     quantity: formData.get("quantity"),
     category: finalCategory,
+    pricePerPiece: formData.get("pricePerPiece"),
+    pricePerMeter: formData.get("pricePerMeter"),
   });
 
   // If validation fails, return detailed error messages.
@@ -56,17 +61,22 @@ export async function addMaterialAction(prevState: any, formData: FormData) {
       success: false,
     };
   }
-
- 
-
- 
-
   // 'try...catch' block to handle potential errors during database operations.
   try {
     const db = await getDatabase();
-    await db.collection("materials").insertOne({
-      ...validatedFields.data,
-    });
+    const { pricePerPiece = undefined, pricePerMeter = undefined, ...rest } = validatedFields.data as any;
+    const pc = Number(pricePerPiece ?? 0) || 0;
+    const pm = Number(pricePerMeter ?? 0) || 0;
+    const doc: Record<string, any> = { ...rest };
+    if (pc > 0 && pm > 0) {
+      // Prefer per-piece if both provided
+      doc.pricePerPiece = pc;
+    } else if (pc > 0) {
+      doc.pricePerPiece = pc;
+    } else if (pm > 0) {
+      doc.pricePerMeter = pm;
+    }
+    await db.collection("materials").insertOne(doc);
     
     // 'revalidatePath' tells Next.js to re-fetch data for these paths on the next request.
     // This ensures the UI is updated with the new material.
@@ -78,6 +88,35 @@ export async function addMaterialAction(prevState: any, formData: FormData) {
     // If an error occurs, log it for debugging and return a failure message.
     console.error("Error adding material:", error);
     return { success: false, message: "Failed to add material. Please try again." };
+  }
+
+}
+
+// Optional: normalize existing materials to keep only one of pricePerPiece/pricePerMeter when both > 0
+export async function normalizeMaterialPricesAction() {
+  try {
+    const db = await getDatabase();
+    const mats = await db.collection("materials").find({}).toArray();
+    const ops: any[] = [];
+    for (const m of mats) {
+      const pc = Number(m.pricePerPiece ?? 0) || 0;
+      const pm = Number(m.pricePerMeter ?? 0) || 0;
+      if (pc > 0 && pm > 0) {
+        ops.push({
+          updateOne: {
+            filter: { _id: m._id },
+            update: { $unset: { pricePerMeter: "" } },
+          },
+        });
+      }
+    }
+    if (ops.length) await db.collection("materials").bulkWrite(ops);
+    revalidatePath("/stock");
+    revalidatePath("/stock/admin");
+    return { success: true, normalized: ops.length };
+  } catch (e) {
+    console.error("normalizeMaterialPricesAction error", e);
+    return { success: false };
   }
 }
 
@@ -100,6 +139,10 @@ const stockAdjustmentSchema = z.object({
   quantity: z.coerce.number().int().min(1, "Quantity must be at least 1."),
   type: z.enum(['in', 'out'], { errorMap: () => ({ message: "Type must be 'in' or 'out'." }) }),
   reason: z.string().optional(),
+});
+
+const clientStockAdjustmentSchema = stockAdjustmentSchema.extend({
+  clientId: z.string().min(1, "Client ID is required."),
 });
 
 // Server action for In/Out quantity adjustments
@@ -169,7 +212,7 @@ export async function stockAdjustmentAction(prevState: any, formData: FormData) 
     );
 
     // Record in stock history
-    await db.collection('stock_history').insertOne({
+    await db.collection('stockHistory').insertOne({
       materialId,
       materialName,
       type,
@@ -228,10 +271,10 @@ export async function deleteMaterial(materialId: string) {
 // Batch update material pricing (rate, gstPercent)
 export async function updateMaterialsPricingAction(prevState: any, formData: FormData) {
   try {
-    const updates: { id: string; rate: number; gstPercent: number }[] = [];
+    const updates: { id: string; rate: number; gstPercent: number; pricePerPiece?: number; pricePerMeter?: number }[] = [];
     const temp: Record<string, any> = {};
     for (const [key, value] of formData.entries()) {
-      const match = key.match(/^pricing\[(.+)\]\[(rate|gstPercent)\]$/);
+      const match = key.match(/^pricing\[(.+)\]\[(rate|gstPercent|pricePerPiece|pricePerMeter)\]$/);
       if (match) {
         const [, id, field] = match;
         if (!temp[id]) temp[id] = {};
@@ -242,7 +285,9 @@ export async function updateMaterialsPricingAction(prevState: any, formData: For
     for (const id of Object.keys(temp)) {
       const rate = Number(temp[id].rate ?? 0) || 0;
       const gstPercent = Number(temp[id].gstPercent ?? 0) || 0;
-      updates.push({ id, rate, gstPercent });
+      const pricePerPiece = temp[id].pricePerPiece !== undefined ? Number(temp[id].pricePerPiece) || 0 : undefined;
+      const pricePerMeter = temp[id].pricePerMeter !== undefined ? Number(temp[id].pricePerMeter) || 0 : undefined;
+      updates.push({ id, rate, gstPercent, pricePerPiece, pricePerMeter });
     }
 
     if (updates.length === 0) {
@@ -250,12 +295,31 @@ export async function updateMaterialsPricingAction(prevState: any, formData: For
     }
 
     const db = await getDatabase();
-    const bulkOps = updates.map(u => ({
-      updateOne: {
-        filter: { _id: new ObjectId(u.id) },
-        update: { $set: { rate: u.rate, gstPercent: u.gstPercent } }
+    const bulkOps = updates.map(u => {
+      const $set: Record<string, any> = { rate: u.rate, gstPercent: u.gstPercent };
+      const $unset: Record<string, any> = {};
+      const hasPc = u.pricePerPiece !== undefined;
+      const hasPm = u.pricePerMeter !== undefined;
+      const pc = Number(u.pricePerPiece ?? 0) || 0;
+      const pm = Number(u.pricePerMeter ?? 0) || 0;
+      if (hasPc) {
+        $set.pricePerPiece = pc;
+        if (pc > 0) $unset.pricePerMeter = "";
       }
-    }));
+      if (hasPm) {
+        $set.pricePerMeter = pm;
+        if (pm > 0) $unset.pricePerPiece = "";
+      }
+      const update: Record<string, any> = {};
+      if (Object.keys($set).length) update.$set = $set;
+      if (Object.keys($unset).length) update.$unset = $unset;
+      return {
+        updateOne: {
+          filter: { _id: new ObjectId(u.id) },
+          update,
+        }
+      };
+    });
     
     await db.collection("materials").bulkWrite(bulkOps);
     revalidatePath("/stock/admin");
@@ -640,4 +704,167 @@ export async function setMaterialQuantityAction(prevState: any, formData: FormDa
   const submissionId = Date.now();
   const res = await setMaterialQuantity(materialId, newQuantity);
   return { ...res, submissionId } as any;
+}
+
+// Pricing: single material price setters
+const materialPriceSchema = z.object({
+  materialId: z.string().min(1),
+  pricePerPiece: z.coerce.number().min(0).optional(),
+  pricePerMeter: z.coerce.number().min(0).optional(),
+});
+
+export async function setMaterialPrices(materialId: string, pricePerPiece?: number, pricePerMeter?: number) {
+  try {
+    const db = await getDatabase();
+    const setUpdate: Record<string, any> = {};
+    const unsetUpdate: Record<string, any> = {};
+    if (pricePerPiece !== undefined && Number.isFinite(pricePerPiece)) {
+      setUpdate.pricePerPiece = pricePerPiece;
+      if (pricePerPiece > 0) unsetUpdate.pricePerMeter = "";
+    }
+    if (pricePerMeter !== undefined && Number.isFinite(pricePerMeter)) {
+      setUpdate.pricePerMeter = pricePerMeter;
+      if (pricePerMeter > 0) unsetUpdate.pricePerPiece = "";
+    }
+    if (Object.keys(setUpdate).length === 0 && Object.keys(unsetUpdate).length === 0) {
+      return { success: false, message: "No price fields provided." };
+    }
+    await db.collection("materials").updateOne(
+      { _id: new ObjectId(materialId) },
+      { ...(Object.keys(setUpdate).length ? { $set: setUpdate } : {}), ...(Object.keys(unsetUpdate).length ? { $unset: unsetUpdate } : {}) }
+    );
+    // Avoid revalidating /stock here to prevent input resets while typing
+    revalidatePath("/stock/admin");
+    return { success: true };
+  } catch (error) {
+    console.error("Error setting material prices:", error);
+    return { success: false, message: "Failed to set prices." };
+  }
+}
+
+export async function setMaterialPricesAction(prevState: any, formData: FormData) {
+  const submissionId = Date.now();
+  const validated = materialPriceSchema.safeParse({
+    materialId: formData.get("materialId"),
+    pricePerPiece: formData.get("pricePerPiece"),
+    pricePerMeter: formData.get("pricePerMeter"),
+  });
+  if (!validated.success) {
+    return { success: false, message: "Invalid price data.", submissionId } as any;
+  }
+  const { materialId, pricePerPiece, pricePerMeter } = validated.data as any;
+  const res = await setMaterialPrices(materialId, pricePerPiece, pricePerMeter);
+  return { ...res, submissionId } as any;
+}
+
+// Client-specific In/Out that also updates client usage and costing
+export async function clientStockAdjustmentAction(prevState: any, formData: FormData) {
+  const submissionId = Date.now();
+  const validated = clientStockAdjustmentSchema.safeParse({
+    clientId: formData.get("clientId"),
+    materialId: formData.get("materialId"),
+    materialName: formData.get("materialName"),
+    quantity: formData.get("quantity"),
+    type: formData.get("type"),
+    reason: formData.get("reason"),
+  });
+  if (!validated.success) {
+    return {
+      success: false,
+      message: "Invalid data submitted.",
+      errors: validated.error.flatten().fieldErrors,
+      submissionId,
+    };
+  }
+  const { clientId, materialId, materialName, quantity, type, reason } = validated.data;
+
+  try {
+    const db = await getDatabase();
+    // Adjust global stock same as normal action
+    const material = await db.collection('materials').findOne({ _id: new ObjectId(materialId) });
+    if (!material) {
+      return { success: false, message: "Material not found.", submissionId };
+    }
+    const currentStock = material.quantity || 0;
+    let newStock: number;
+    if (type === 'in') {
+      newStock = currentStock + quantity;
+    } else {
+      if (quantity > currentStock) {
+        return { success: false, message: `Insufficient stock. Available: ${currentStock}, Requested: ${quantity}`, submissionId };
+      }
+      newStock = currentStock - quantity;
+    }
+    await db.collection('materials').updateOne({ _id: new ObjectId(materialId) }, { $set: { quantity: newStock } });
+    // Record client entry
+    await db.collection('client_material_entries').insertOne({
+      clientId,
+      type,
+      date: new Date(),
+      reason: reason || (type === 'in' ? 'Client Return' : 'Client Dispatch'),
+      materials: [
+        { materialId, materialName, quantity }
+      ],
+    });
+    // Recompute client costing and upsert snapshot for quick load
+    const entries = await db.collection('client_material_entries').find({ clientId }).toArray();
+    const usageMap = new Map<string, { name: string; qty: number }>();
+    for (const entry of entries as any[]) {
+      const sign = entry.type === 'in' ? -1 : 1;
+      const items: any[] = Array.isArray(entry.materials) ? entry.materials : [];
+      for (const it of items) {
+        const mid = String(it.materialId || '');
+        if (!mid) continue;
+        const name = String(it.materialName || '');
+        const q = Number(it.quantity) || 0;
+        const prev = usageMap.get(mid) || { name, qty: 0 };
+        usageMap.set(mid, { name: prev.name || name, qty: prev.qty + sign * q });
+      }
+    }
+    const materialIds = Array.from(usageMap.keys());
+    const validObjIds = materialIds.filter(id => ObjectId.isValid(id)).map(id => new ObjectId(id));
+    const mats = validObjIds.length > 0 ? await db.collection('materials').find({ _id: { $in: validObjIds } }).toArray() : [];
+    const byId: Record<string, any> = {};
+    const byName: Record<string, any> = {};
+    for (const m of mats) { byId[m._id.toString()] = m; if (m.name) byName[String(m.name).toLowerCase()] = m; }
+    const items = materialIds.map(id => {
+      const u = usageMap.get(id)!;
+      const qty = Math.max(0, Number(u.qty) || 0);
+      let m = byId[id] || {};
+      if (!m || Object.keys(m).length === 0) {
+        const key = String(u.name || '').toLowerCase();
+        if (key && byName[key]) m = byName[key];
+      }
+      const pp = Number(m?.pricePerPiece ?? 0) || 0;
+      const pm = Number(m?.pricePerMeter ?? 0) || 0;
+      const r = Number(m?.rate ?? 0) || 0;
+      const unitPrice = pp > 0 ? pp : pm > 0 ? pm : r > 0 ? r : 0;
+      const gstPercent = Number(m.gstPercent) || 0;
+      const base = qty * unitPrice;
+      const gst = base * (gstPercent / 100);
+      const total = base + gst;
+      return { materialId: id, name: u.name || m.name || '', qty, rate: unitPrice, gstPercent, base, gst, total };
+    }).filter(r => r.qty > 0).sort((a, b) => a.name.localeCompare(b.name));
+    const beforeTax = items.reduce((s, r) => s + r.base, 0);
+    const gstSum = items.reduce((s, r) => s + r.gst, 0);
+    const grand = beforeTax + gstSum;
+    await db.collection('client_costing').updateOne(
+      { clientId },
+      { $set: { clientId, items, beforeTax, gst: gstSum, grand, updatedAt: new Date() } },
+      { upsert: true }
+    );
+
+    // Revalidate
+    revalidatePath(`/client-costing/${clientId}`);
+    revalidatePath(`/client-material/${clientId}`);
+    revalidatePath('/stock');
+    return {
+      success: true,
+      message: type === 'in' ? `Client returned ${quantity}. New stock: ${newStock}` : `Client used ${quantity}. New stock: ${newStock}`,
+      submissionId,
+    };
+  } catch (error) {
+    console.error('Error in client stock adjustment:', error);
+    return { success: false, message: 'Server error occurred. Please try again.', submissionId };
+  }
 }

@@ -9,7 +9,7 @@ import { StockAdjustmentModal } from "@/components/materials/StockAdjustmentModa
 
 const LOW_STOCK_THRESHOLD = 10;
 
-export function ClientMaterialStock() {
+export function ClientMaterialStock({ clientId }: { clientId?: string }) {
   const { materials, loading } = useMaterials();
   const [searchTerm, setSearchTerm] = useState("");
 
@@ -57,7 +57,7 @@ export function ClientMaterialStock() {
                   </TableCell>
                   <TableCell className="text-muted-foreground">{m.description || "-"}</TableCell>
                   <TableCell className="text-center font-semibold">{m.quantity}</TableCell>
-                  <TableCell className="text-center"><StockAdjustmentModal material={m} /></TableCell>
+                  <TableCell className="text-center"><StockAdjustmentModal material={m} clientId={clientId} /></TableCell>
                 </TableRow>
               );
             })}

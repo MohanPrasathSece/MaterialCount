@@ -11,6 +11,8 @@ export type Material = {
   category?: 'Wiring' | 'Fabrication' | 'Other'; // Category for grouping materials.
   rate?: number;       // Optional per-unit rate for costing.
   gstPercent?: number; // Optional GST percentage for this material.
+  pricePerPiece?: number; // Optional price per piece for this material.
+  pricePerMeter?: number; // Optional price per meter for this material.
 };
 
 // Defines the structure for a client.
@@ -61,4 +63,26 @@ export type StockHistory = {
     timestamp: Date;
     items: StockHistoryItem[];
     totalItems: number;
+}
+
+// Client costing structures
+export type ClientCostRow = {
+  materialId: string;
+  name: string;
+  qty: number;
+  rate: number;
+  gstPercent: number;
+  base: number;
+  gst: number;
+  total: number;
+}
+
+export type ClientCostingRecord = {
+  id?: string;
+  clientId: string;
+  items: ClientCostRow[];
+  beforeTax: number;
+  gst: number;
+  grand: number;
+  updatedAt: Date | string;
 }

@@ -40,9 +40,11 @@ export function StockHistory() {
     const { history, loading } = useStockHistory();
     const [searchTerm, setSearchTerm] = useState("");
 
-    const filteredHistory = history.filter(record => 
-        record.items.some(item => item.materialName.toLowerCase().includes(searchTerm.toLowerCase()))
-    );
+    const filteredHistory = (history || []).filter(record => {
+        const items = Array.isArray(record?.items) ? record.items : [];
+        const term = searchTerm.toLowerCase();
+        return items.some(item => String(item?.materialName || "").toLowerCase().includes(term));
+    });
 
     return (
         <Card>
@@ -78,7 +80,7 @@ export function StockHistory() {
                                     <div className="flex justify-between items-center w-full pr-4">
                                         <div className="flex flex-col text-left">
                                             <span className="font-semibold">{formatTimestamp(record.timestamp)}</span>
-                                            <span className="text-sm text-muted-foreground">{record.items.length} material types updated</span>
+                                            <span className="text-sm text-muted-foreground">{Array.isArray(record.items) ? record.items.length : 0} material types updated</span>
                                         </div>
                                         <div className="text-right">
                                             <span className="font-semibold text-primary">+{record.totalItems}</span>
@@ -88,7 +90,7 @@ export function StockHistory() {
                                 </AccordionTrigger>
                                 <AccordionContent>
                                     <ul className="space-y-2 pl-4 pt-2 border-l ml-2">
-                                        {record.items.map((item) => (
+                                        {(Array.isArray(record.items) ? record.items : []).map((item) => (
                                             <li key={item.materialId} className="flex justify-between">
                                                 <span>{item.materialName}</span>
                                                 <span className="font-mono text-green-600">+{item.quantityAdded}</span>

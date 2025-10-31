@@ -67,6 +67,8 @@ export function AddMaterialModal() {
   const [state, formAction] = useActionState(addMaterialAction, initialState);
   const [categoryMode, setCategoryMode] = useState<"existing" | "new">("existing");
   const [selectedCategory, setSelectedCategory] = useState<string>("");
+  const [pricePerPiece, setPricePerPiece] = useState<string>("");
+  const [pricePerMeter, setPricePerMeter] = useState<string>("");
 
   // The 'useEffect' hook runs after the component renders and whenever 'state' changes.
   // This is the perfect place to handle the result of the form submission.
@@ -83,6 +85,11 @@ export function AddMaterialModal() {
         setOpen(false);
         // Reset the form fields to be empty for the next time the modal is opened.
         formRef.current?.reset();
+        // Also reset local states for controlled inputs
+        setPricePerPiece("");
+        setPricePerMeter("");
+        setSelectedCategory("");
+        setCategoryMode("existing");
       } else {
         // If the action was not successful (e.g., validation error), show a destructive toast.
         toast({
@@ -177,6 +184,47 @@ export function AddMaterialModal() {
                 </div>
               )}
               {state.errors?.category && <p className="text-sm text-destructive">{state.errors.category[0]}</p>}
+            </div>
+          </div>
+          {/* Optional Pricing */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="pricePerPiece">Price per Piece (optional)</Label>
+              <Input
+                id="pricePerPiece"
+                name="pricePerPiece"
+                type="number"
+                min={0}
+                step={0.01}
+                inputMode="decimal"
+                value={pricePerPiece}
+                onChange={(e) => {
+                  setPricePerPiece(e.target.value);
+                  if ((Number(e.target.value) || 0) > 0) {
+                    setPricePerMeter("");
+                  }
+                }}
+                placeholder="e.g., 12.50"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="pricePerMeter">Price per Meter (optional)</Label>
+              <Input
+                id="pricePerMeter"
+                name="pricePerMeter"
+                type="number"
+                min={0}
+                step={0.01}
+                inputMode="decimal"
+                value={pricePerMeter}
+                onChange={(e) => {
+                  setPricePerMeter(e.target.value);
+                  if ((Number(e.target.value) || 0) > 0) {
+                    setPricePerPiece("");
+                  }
+                }}
+                placeholder="e.g., 8.75"
+              />
             </div>
           </div>
           <DialogFooter>

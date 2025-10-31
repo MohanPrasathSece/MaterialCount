@@ -19,6 +19,8 @@ export async function GET() {
       category: material.category,
       rate: material.rate,
       gstPercent: material.gstPercent,
+      pricePerPiece: material.pricePerPiece,
+      pricePerMeter: material.pricePerMeter,
     }));
 
     return NextResponse.json(formattedMaterials);

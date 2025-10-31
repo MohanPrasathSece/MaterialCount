@@ -8,12 +8,13 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Plus, Minus, PackagePlus, PackageMinus } from "lucide-react";
-import { stockAdjustmentAction } from "@/app/actions";
+import { stockAdjustmentAction, clientStockAdjustmentAction } from "@/app/actions";
 import { useToast } from "@/hooks/use-toast";
 import type { Material } from "@/lib/types";
 
 type StockAdjustmentModalProps = {
   material: Material;
+  clientId?: string;
 };
 
 const initialState = {
@@ -23,14 +24,14 @@ const initialState = {
   submissionId: 0,
 };
 
-export function StockAdjustmentModal({ material }: StockAdjustmentModalProps) {
+export function StockAdjustmentModal({ material, clientId }: StockAdjustmentModalProps) {
   const [open, setOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"in" | "out">("in");
   const [quantity, setQuantity] = useState("1");
   const [reason, setReason] = useState("");
   const { toast } = useToast();
   
-  const [state, formAction] = useActionState(stockAdjustmentAction, initialState);
+  const [state, formAction] = useActionState((clientId ? clientStockAdjustmentAction : stockAdjustmentAction) as any, initialState as any);
   const [lastSubmissionId, setLastSubmissionId] = useState(0);
 
   useEffect(() => {
@@ -56,9 +57,7 @@ export function StockAdjustmentModal({ material }: StockAdjustmentModalProps) {
     }
   }, [state, lastSubmissionId, toast]);
 
-  const handleSubmit = (formData: FormData) => {
-    formAction(formData);
-  };
+  // No manual submit; we use form action={formAction} and include clientId as hidden input when present.
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -104,8 +103,9 @@ export function StockAdjustmentModal({ material }: StockAdjustmentModalProps) {
           </TabsList>
 
           <TabsContent value="in" className="space-y-4 mt-4">
-            <form action={handleSubmit} className="space-y-4">
+            <form action={formAction as any} className="space-y-4">
               <input type="hidden" name="materialId" value={material.id} />
+              {clientId && <input type="hidden" name="clientId" value={clientId} />}
               <input type="hidden" name="materialName" value={material.name} />
               <input type="hidden" name="type" value="in" />
 
@@ -153,8 +153,9 @@ export function StockAdjustmentModal({ material }: StockAdjustmentModalProps) {
           </TabsContent>
 
           <TabsContent value="out" className="space-y-4 mt-4">
-            <form action={handleSubmit} className="space-y-4">
+            <form action={formAction as any} className="space-y-4">
               <input type="hidden" name="materialId" value={material.id} />
+              {clientId && <input type="hidden" name="clientId" value={clientId} />}
               <input type="hidden" name="materialName" value={material.name} />
               <input type="hidden" name="type" value="out" />
 

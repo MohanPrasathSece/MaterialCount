@@ -19,12 +19,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { AddMaterialModal } from "./AddMaterialModal";
 import { DeleteMaterialDialog } from "./DeleteMaterialDialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Terminal, Search, FileDown, Plus, Minus, AlertTriangle } from "lucide-react";
+import { Terminal, Search, FileDown, AlertTriangle } from "lucide-react";
 import { FillStockModal } from "./FillStockModal";
 import { Input } from "../ui/input";
 import type { Material } from "@/lib/types";
 import { Button } from "../ui/button";
-import { adjustMaterialQuantityAction, setMaterialQuantityAction } from "@/app/actions";
+import { setMaterialQuantityAction, setMaterialPricesAction, updateMaterialsPricingAction } from "@/app/actions";
 import { useActionState } from "react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -39,21 +39,16 @@ export function MaterialInventory() {
   const isOwner = useOwner();
   const [searchTerm, setSearchTerm] = useState("");
   const { toast } = useToast();
-  const [adjustState, adjustAction] = useActionState(adjustMaterialQuantityAction as any, { success: false, submissionId: 0, message: null } as any);
-  const [lastSubmission, setLastSubmission] = useState<number>(0);
   const [setState, setQtyAction] = useActionState(setMaterialQuantityAction as any, { success: false, submissionId: 0, message: null } as any);
   const [lastSetSubmission, setLastSetSubmission] = useState<number>(0);
+  const [priceState, priceAction] = useActionState(setMaterialPricesAction as any, { success: false, submissionId: 0, message: null } as any);
+  const [pricingState, pricingAction] = useActionState(updateMaterialsPricingAction as any, { success: false, message: "" } as any);
   const qtyDraft = useRef<Record<string, number>>({});
   const qtyTimers = useRef<Record<string, any>>({});
+  const priceTimers = useRef<Record<string, any>>({});
+  const priceDraft = useRef<Record<string, { pc?: string; pm?: string; gst?: string }>>({});
 
-  useEffect(() => {
-    if (adjustState && adjustState.submissionId && adjustState.submissionId !== lastSubmission) {
-      setLastSubmission(adjustState.submissionId);
-      if (!(adjustState as any).success && (adjustState as any).message) {
-        toast({ variant: "destructive", title: "Error", description: (adjustState as any).message });
-      }
-    }
-  }, [adjustState, lastSubmission, toast]);
+  
 
   // Only show errors for manual set quantity
   useEffect(() => {
@@ -151,7 +146,9 @@ export function MaterialInventory() {
                             <TableHead className="font-headline w-[25%]">Material</TableHead>
                             <TableHead className="font-headline w-[35%]">Description</TableHead>
                             <TableHead className="text-center font-headline w-[15%]">Quantity</TableHead>
-                            <TableHead className="text-center font-headline w-[15%]">Adjust</TableHead>
+                            <TableHead className="text-center font-headline w-[7.5%]">Price/Pc</TableHead>
+                            <TableHead className="text-center font-headline w-[7.5%]">Price/m</TableHead>
+                            <TableHead className="text-center font-headline w-[7%]">GST %</TableHead>
                             {isOwner && <TableHead className="w-[10%]"><span className="sr-only">Actions</span></TableHead>}
                         </TableRow>
                     </TableHeader>
@@ -176,29 +173,116 @@ export function MaterialInventory() {
                                         min={0}
                                         step={1}
                                         inputMode="numeric"
-                                        defaultValue={material.quantity}
+                                        value={
+                                          qtyDraft.current[material.id] !== undefined
+                                            ? qtyDraft.current[material.id]
+                                            : material.quantity
+                                        }
                                         className={`w-24 text-center ${isLowStock ? 'text-destructive font-bold' : 'font-semibold'}`}
                                         onChange={(e) => handleQtyInputChange(material.id, Number(e.target.value || 0), (e.target as HTMLInputElement).form)}
                                       />
                                     </form>
                                 </TableCell>
-                                <TableCell>
-                                    <div className="flex items-center justify-center gap-1">
-                                        <form action={adjustAction}>
-                                          <input type="hidden" name="materialId" value={material.id} />
-                                          <input type="hidden" name="adjustment" value={-1} />
-                                          <Button size="icon" variant="outline" className="h-8 w-8" type="submit" disabled={material.quantity === 0}>
-                                            <Minus className="h-4 w-4" />
-                                          </Button>
-                                        </form>
-                                        <form action={adjustAction}>
-                                          <input type="hidden" name="materialId" value={material.id} />
-                                          <input type="hidden" name="adjustment" value={1} />
-                                          <Button size="icon" variant="outline" className="h-8 w-8" type="submit">
-                                            <Plus className="h-4 w-4" />
-                                          </Button>
-                                        </form>
-                                    </div>
+                                <TableCell className="text-center">
+                                  <form action={priceAction} className="inline-flex items-center justify-center">
+                                    <input type="hidden" name="materialId" value={material.id} />
+                                    <Input
+                                      name="pricePerPiece"
+                                      type="number"
+                                      min={0}
+                                      step={0.01}
+                                      inputMode="decimal"
+                                      value={priceDraft.current[material.id]?.pc ?? (material.pricePerPiece ?? '')}
+                                      className="w-24 text-center"
+                                      disabled={(Number(priceDraft.current[material.id]?.pm ?? material.pricePerMeter ?? 0) || 0) > 0}
+                                      onChange={(e) => {
+                                        const form = (e.target as HTMLInputElement).form;
+                                        if (!form) return;
+                                        priceDraft.current[material.id] = {
+                                          ...(priceDraft.current[material.id] || {}),
+                                          pc: e.target.value,
+                                        };
+                                        if (priceTimers.current[material.id+"_pc"]) clearTimeout(priceTimers.current[material.id+"_pc"]);
+                                        priceTimers.current[material.id+"_pc"] = setTimeout(() => {
+                                          if (priceDraft.current[material.id]?.pc === '') return;
+                                          form.requestSubmit();
+                                        }, 800);
+                                      }}
+                                    />
+                                  </form>
+                                </TableCell>
+                                <TableCell className="text-center">
+                                  <form action={priceAction} className="inline-flex items-center justify-center">
+                                    <input type="hidden" name="materialId" value={material.id} />
+                                    <Input
+                                      name="pricePerMeter"
+                                      type="number"
+                                      min={0}
+                                      step={0.01}
+                                      inputMode="decimal"
+                                      value={priceDraft.current[material.id]?.pm ?? (material.pricePerMeter ?? '')}
+                                      className="w-24 text-center"
+                                      disabled={(Number(priceDraft.current[material.id]?.pc ?? material.pricePerPiece ?? 0) || 0) > 0}
+                                      onChange={(e) => {
+                                        const form = (e.target as HTMLInputElement).form;
+                                        if (!form) return;
+                                        priceDraft.current[material.id] = {
+                                          ...(priceDraft.current[material.id] || {}),
+                                          pm: e.target.value,
+                                        };
+                                        if (priceTimers.current[material.id+"_pm"]) clearTimeout(priceTimers.current[material.id+"_pm"]);
+                                        priceTimers.current[material.id+"_pm"] = setTimeout(() => {
+                                          if (priceDraft.current[material.id]?.pm === '') return;
+                                          form.requestSubmit();
+                                        }, 800);
+                                      }}
+                                    />
+                                  </form>
+                                </TableCell>
+                                <TableCell className="text-center">
+                                  <form action={pricingAction} className="inline-flex items-center justify-center">
+                                    <Input
+                                      name={`pricing[${material.id}][gstPercent]`}
+                                      type="number"
+                                      min={0}
+                                      step={1}
+                                      inputMode="numeric"
+                                      value={priceDraft.current[material.id]?.gst ?? (material.gstPercent ?? '')}
+                                      className="w-20 text-center"
+                                      onChange={(e) => {
+                                        const form = (e.target as HTMLInputElement).form;
+                                        if (!form) return;
+                                        priceDraft.current[material.id] = {
+                                          ...(priceDraft.current[material.id] || {}),
+                                          gst: e.target.value,
+                                        };
+                                        if (priceTimers.current[material.id+"_gst"]) clearTimeout(priceTimers.current[material.id+"_gst"]);
+                                        priceTimers.current[material.id+"_gst"] = setTimeout(() => {
+                                          if (priceDraft.current[material.id]?.gst === '') return;
+                                          form.requestSubmit();
+                                        }, 800);
+                                      }}
+                                    />
+                                  </form>
+                                </TableCell>
+                                <TableCell className="text-center">
+                                  <form action={pricingAction} className="inline-flex items-center justify-center">
+                                    <Input
+                                      name={`pricing[${material.id}][gstPercent]`}
+                                      type="number"
+                                      min={0}
+                                      step={1}
+                                      inputMode="numeric"
+                                      defaultValue={material.gstPercent ?? 0}
+                                      className="w-20 text-center"
+                                      onChange={(e) => {
+                                        const form = (e.target as HTMLInputElement).form;
+                                        if (!form) return;
+                                        if (priceTimers.current[material.id+"_gst"]) clearTimeout(priceTimers.current[material.id+"_gst"]);
+                                        priceTimers.current[material.id+"_gst"] = setTimeout(() => form.requestSubmit(), 800);
+                                      }}
+                                    />
+                                  </form>
                                 </TableCell>
                                 {isOwner && (
                                     <TableCell className="text-right">
@@ -242,27 +326,99 @@ export function MaterialInventory() {
                                       min={0}
                                       step={1}
                                       inputMode="numeric"
-                                      defaultValue={material.quantity}
+                                      value={
+                                        qtyDraft.current[material.id] !== undefined
+                                          ? qtyDraft.current[material.id]
+                                          : material.quantity
+                                      }
                                       className={`w-24 text-center ${isLowStock ? 'text-destructive font-bold' : 'text-primary font-bold'}`}
                                       onChange={(e) => handleQtyInputChange(material.id, Number(e.target.value || 0), (e.target as HTMLInputElement).form)}
                                     />
                                 </form>
-                                <div className="flex items-center gap-1">
-                                    <form action={adjustAction}>
-                                      <input type="hidden" name="materialId" value={material.id} />
-                                      <input type="hidden" name="adjustment" value={-1} />
-                                      <Button size="icon" variant="outline" className="h-8 w-8" type="submit" disabled={material.quantity === 0}>
-                                        <Minus className="h-4 w-4" />
-                                      </Button>
-                                    </form>
-                                    <form action={adjustAction}>
-                                      <input type="hidden" name="materialId" value={material.id} />
-                                      <input type="hidden" name="adjustment" value={1} />
-                                      <Button size="icon" variant="outline" className="h-8 w-8" type="submit">
-                                        <Plus className="h-4 w-4" />
-                                      </Button>
-                                    </form>
-                                </div>
+                                
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                              <form action={priceAction} className="flex items-center gap-2">
+                                <input type="hidden" name="materialId" value={material.id} />
+                                <span className="text-sm">Price/Pc</span>
+                                <Input
+                                  name="pricePerPiece"
+                                  type="number"
+                                  min={0}
+                                  step={0.01}
+                                  inputMode="decimal"
+                                  value={priceDraft.current[material.id]?.pc ?? (material.pricePerPiece ?? '')}
+                                  className="text-center"
+                                  disabled={(Number(priceDraft.current[material.id]?.pm ?? material.pricePerMeter ?? 0) || 0) > 0}
+                                  onChange={(e) => {
+                                    const form = (e.target as HTMLInputElement).form;
+                                    if (!form) return;
+                                    priceDraft.current[material.id] = {
+                                      ...(priceDraft.current[material.id] || {}),
+                                      pc: e.target.value,
+                                    };
+                                    if (priceTimers.current[material.id+"_pc_m"]) clearTimeout(priceTimers.current[material.id+"_pc_m"]);
+                                    priceTimers.current[material.id+"_pc_m"] = setTimeout(() => {
+                                      if (priceDraft.current[material.id]?.pc === '') return;
+                                      form.requestSubmit();
+                                    }, 800);
+                                  }}
+                                />
+                              </form>
+                              <form action={priceAction} className="flex items-center gap-2 justify-end">
+                                <input type="hidden" name="materialId" value={material.id} />
+                                <span className="text-sm">Price/m</span>
+                                <Input
+                                  name="pricePerMeter"
+                                  type="number"
+                                  min={0}
+                                  step={0.01}
+                                  inputMode="decimal"
+                                  value={priceDraft.current[material.id]?.pm ?? (material.pricePerMeter ?? '')}
+                                  className="text-center"
+                                  disabled={(Number(priceDraft.current[material.id]?.pc ?? material.pricePerPiece ?? 0) || 0) > 0}
+                                  onChange={(e) => {
+                                    const form = (e.target as HTMLInputElement).form;
+                                    if (!form) return;
+                                    priceDraft.current[material.id] = {
+                                      ...(priceDraft.current[material.id] || {}),
+                                      pm: e.target.value,
+                                    };
+                                    if (priceTimers.current[material.id+"_pm_m"]) clearTimeout(priceTimers.current[material.id+"_pm_m"]);
+                                    priceTimers.current[material.id+"_pm_m"] = setTimeout(() => {
+                                      if (priceDraft.current[material.id]?.pm === '') return;
+                                      form.requestSubmit();
+                                    }, 800);
+                                  }}
+                                />
+                              </form>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                              <form action={pricingAction} className="flex items-center gap-2">
+                                <span className="text-sm">GST %</span>
+                                <Input
+                                  name={`pricing[${material.id}][gstPercent]`}
+                                  type="number"
+                                  min={0}
+                                  step={1}
+                                  inputMode="numeric"
+                                  value={priceDraft.current[material.id]?.gst ?? (material.gstPercent ?? '')}
+                                  className="text-center"
+                                  onChange={(e) => {
+                                    const form = (e.target as HTMLInputElement).form;
+                                    if (!form) return;
+                                    priceDraft.current[material.id] = {
+                                      ...(priceDraft.current[material.id] || {}),
+                                      gst: e.target.value,
+                                    };
+                                    if (priceTimers.current[material.id+"_gst_m"]) clearTimeout(priceTimers.current[material.id+"_gst_m"]);
+                                    priceTimers.current[material.id+"_gst_m"] = setTimeout(() => {
+                                      if (priceDraft.current[material.id]?.gst === '') return;
+                                      form.requestSubmit();
+                                    }, 800);
+                                  }}
+                                />
+                              </form>
                             </div>
                             
                         </div>
