@@ -153,12 +153,30 @@ export function ClientCosting({ client, materials, clientHistory }: Props) {
 
   const downloadPdf = () => {
     const doc = new jsPDF();
-    const title = `Client Costing - ${client.name}`;
-    doc.setFontSize(16);
-    doc.text(title, 14, 16);
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const marginX = 14;
+    const lineY = 30;
+    const dateStr = new Date().toLocaleString();
+
+    // Header
+    doc.setFontSize(18);
+    doc.text("Client Costing", marginX, 16);
     doc.setFontSize(10);
-    doc.text(`Address: ${client.address}`, 14, 22);
-    doc.text(`Consumer No: ${client.consumerNo} | Plant Capacity: ${client.plantCapacity}`, 14, 28);
+    doc.text(`Generated: ${dateStr}`, pageWidth - marginX - 50, 16, { align: "left" });
+
+    // Client details block
+    doc.setDrawColor(200);
+    doc.line(marginX, 20, pageWidth - marginX, 20);
+    doc.setFontSize(11);
+    doc.text(`Client: ${client.name}`, marginX, 26);
+    const addr = client.address || "-";
+    const addrLines = doc.splitTextToSize(`Address: ${addr}`, pageWidth - marginX * 2);
+    doc.text(addrLines, marginX, lineY);
+    const yAfterAddr = lineY + (Array.isArray(addrLines) ? addrLines.length * 5 : 5);
+    doc.text(`Consumer No: ${client.consumerNo ?? '-'}`, marginX, yAfterAddr);
+    doc.text(`Plant Capacity: ${client.plantCapacity ?? '-'}`, marginX + 80, yAfterAddr);
+
+    // Table
     autoTable(doc, {
       head: [["Item", "Used Qty", "GST %", "Base Amt", "GST Amt", "Total"]],
       body: rows.map(r => [
@@ -169,14 +187,43 @@ export function ClientCosting({ client, materials, clientHistory }: Props) {
         r.gst.toFixed(2),
         r.total.toFixed(2)
       ]),
-      startY: 36,
-      styles: { fontSize: 9 },
+      startY: yAfterAddr + 6,
+      theme: "grid",
+      styles: { fontSize: 9, cellPadding: 2 },
+      headStyles: { fillColor: [30, 58, 138], textColor: 255 },
+      columnStyles: {
+        1: { halign: 'right' },
+        2: { halign: 'right' },
+        3: { halign: 'right' },
+        4: { halign: 'right' },
+        5: { halign: 'right' },
+      },
     });
-    const y = (doc as any).lastAutoTable.finalY + 8;
+
+    // Totals block
+    let y = (doc as any).lastAutoTable.finalY + 8;
     doc.setFontSize(12);
-    doc.text(`Total Before Tax: ${summary.beforeTax.toFixed(2)}`, 14, y);
-    doc.text(`Total GST: ${summary.gst.toFixed(2)}`, 14, y + 6);
-    doc.text(`Grand Total: ${summary.grand.toFixed(2)}`, 14, y + 12);
+    doc.text("Summary", marginX, y);
+    y += 2;
+    doc.setDrawColor(200);
+    doc.line(marginX, y, marginX + 30, y);
+    y += 6;
+    doc.setFontSize(11);
+    doc.text(`Total Before Tax: ${summary.beforeTax.toFixed(2)}`, marginX, y);
+    y += 6;
+    doc.text(`Total GST: ${summary.gst.toFixed(2)}`, marginX, y);
+    y += 6;
+    doc.setFontSize(12);
+    doc.text(`Grand Total: ${summary.grand.toFixed(2)}`, marginX, y);
+
+    // Footer page number
+    const pageCount = doc.getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
+      doc.setPage(i);
+      doc.setFontSize(9);
+      doc.text(`Page ${i} of ${pageCount}`, pageWidth - marginX, doc.internal.pageSize.getHeight() - 10, { align: 'right' });
+    }
+
     const fileName = `Costing_${client.name.replace(/\s+/g, "_")}_${new Date().toISOString().slice(0,10)}.pdf`;
     doc.save(fileName);
   };
@@ -185,13 +232,15 @@ export function ClientCosting({ client, materials, clientHistory }: Props) {
     <Card>
       <CardHeader className="flex items-center justify-between flex-row">
         <CardTitle className="font-headline">Client Costing</CardTitle>
-        {isOwner && (
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={downloadPdf}>Download PDF</Button>
-            <Button variant="outline" onClick={recomputeFromUsage} disabled={reloading}>{reloading ? 'Recomputing...' : 'Recompute from usage'}</Button>
-            <Button onClick={save} disabled={saving}>{saving ? 'Saving...' : 'Save'}</Button>
-          </div>
-        )}
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={downloadPdf}>Download PDF</Button>
+          {isOwner && (
+            <>
+              <Button variant="outline" onClick={recomputeFromUsage} disabled={reloading}>{reloading ? 'Recomputing...' : 'Recompute from usage'}</Button>
+              <Button onClick={save} disabled={saving}>{saving ? 'Saving...' : 'Save'}</Button>
+            </>
+          )}
+        </div>
       </CardHeader>
       <CardContent>
         <div className="w-full overflow-x-auto border rounded-lg">

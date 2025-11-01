@@ -53,10 +53,10 @@ export function ClientCard({ client }: ClientCardProps) {
                     {/* If there's no avatar URL or it fails to load, the AvatarFallback with initials is shown. */}
                     <AvatarFallback>{initials}</AvatarFallback>
                 </Avatar>
-                <div className="flex-1">
-                    <CardTitle className="text-lg font-headline">{client.name}</CardTitle>
+                <div className="flex-1 min-w-0">
+                    <CardTitle className="text-lg font-headline truncate" title={client.name}>{client.name}</CardTitle>
                     {netQty !== null && (
-                      <CardDescription className="mt-1">
+                      <CardDescription className="mt-1 truncate">
                         Net Used: <Badge variant="secondary" className="ml-1">{netQty}</Badge>
                       </CardDescription>
                     )}

@@ -42,8 +42,8 @@ export function ClientGrid() {
                 <AddClientModal />
             </div>
         </div>
-        {/* The grid layout for the cards. It's responsive, changing columns on different screen sizes. */}
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+        {/* The grid layout for the cards. Force one card per row across breakpoints. */}
+        <div className="grid grid-cols-1 gap-4">
         {/* Conditional rendering based on the 'loading' state. */}
         {loading ? (
             // If data is loading, display a series of skeleton cards as placeholders.
