@@ -34,7 +34,7 @@ interface jsPDFWithAutoTable extends jsPDF {
 
 const LOW_STOCK_THRESHOLD = 10;
 
-export function MaterialInventory() {
+export function MaterialInventory({ showDescription = true }: { showDescription?: boolean }) {
   const { materials, loading } = useMaterials();
   const isOwner = useOwner();
   const [searchTerm, setSearchTerm] = useState("");

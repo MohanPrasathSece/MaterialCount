@@ -4,10 +4,10 @@ import { ObjectId } from 'mongodb';
 
 export async function GET(
   _req: Request,
-  { params }: { params: { clientId: string } }
+  { params }: { params: Promise<{ clientId: string }> }
 ) {
   try {
-    const { clientId } = params;
+    const { clientId } = await params;
     const db = await getDatabase();
 
     const existing = await db.collection('client_costing').findOne({ clientId });
@@ -96,10 +96,10 @@ export async function GET(
 
 export async function PUT(
   req: Request,
-  { params }: { params: { clientId: string } }
+  { params }: { params: Promise<{ clientId: string }> }
 ) {
   try {
-    const { clientId } = params;
+    const { clientId } = await params;
     const body = await req.json();
     const items = Array.isArray(body?.items) ? body.items : [];
 

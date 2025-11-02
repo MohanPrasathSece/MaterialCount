@@ -34,8 +34,8 @@ async function getClientHistory(clientId: string): Promise<ClientMaterialEntry[]
   return [];
 }
 
-export default async function ClientCostingPage({ params }: { params: { clientId: string } }) {
-  const { clientId } = params;
+export default async function ClientCostingPage({ params }: { params: Promise<{ clientId: string }> }) {
+  const { clientId } = await params;
   const client = await getClient(clientId);
   if (!client) notFound();
   const [materials, clientHistory] = await Promise.all([
