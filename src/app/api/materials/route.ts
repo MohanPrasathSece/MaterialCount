@@ -20,6 +20,9 @@ export async function GET() {
       rate: material.rate,
       gstPercent: material.gstPercent,
       price: material.price ?? material.pricePerPiece ?? material.pricePerMeter,
+      investedBase: material.investedBase ?? 0,
+      investedGst: material.investedGst ?? 0,
+      investedTotal: material.investedTotal ?? 0,
     }));
 
     return NextResponse.json(formattedMaterials);

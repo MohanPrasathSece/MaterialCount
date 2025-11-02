@@ -60,6 +60,14 @@ export function MaterialInventory({ showDescription = true }: { showDescription?
     }
   }, [setState, lastSetSubmission, toast]);
 
+  const totalInvested = useMemo(() => {
+    return (materials || []).reduce((sum, m) => sum + (Number((m as any).investedTotal ?? 0) || 0), 0);
+  }, [materials]);
+
+  const totalGST = useMemo(() => {
+    return (materials || []).reduce((sum, m) => sum + (Number((m as any).investedGst ?? 0) || 0), 0);
+  }, [materials]);
+
   const handleQtyInputChange = (materialId: string, value: number, formEl: HTMLFormElement | null) => {
     qtyDraft.current[materialId] = value;
     if (!formEl) return;
@@ -148,6 +156,7 @@ export function MaterialInventory({ showDescription = true }: { showDescription?
                             <TableHead className="text-center font-headline w-[15%]">Quantity</TableHead>
                             <TableHead className="text-center font-headline w-[15%]">Price</TableHead>
                             <TableHead className="text-center font-headline w-[7%]">GST %</TableHead>
+                            {isOwner && <TableHead className="text-center font-headline w-[15%]">Invested</TableHead>}
                             {isOwner && <TableHead className="w-[10%]"><span className="sr-only">Actions</span></TableHead>}
                         </TableRow>
                     </TableHeader>
@@ -253,6 +262,14 @@ export function MaterialInventory({ showDescription = true }: { showDescription?
                                     <span className="inline-block w-20 text-center">{material.gstPercent ?? '-'}</span>
                                   )}
                                 </TableCell>
+                                {isOwner && (
+                                  <TableCell className="text-center">
+                                    {(() => {
+                                      const investedTotal = Number((material as any).investedTotal ?? 0) || 0;
+                                      return investedTotal.toFixed(2);
+                                    })()}
+                                  </TableCell>
+                                )}
                                 {isOwner && (
                                     <TableCell className="text-right">
                                         <DeleteMaterialDialog materialId={material.id} materialName={material.name} />
@@ -387,6 +404,19 @@ export function MaterialInventory({ showDescription = true }: { showDescription?
                                 </div>
                               )}
                             </div>
+                            {isOwner && (
+                              <div className="grid grid-cols-1 gap-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm">Invested</span>
+                                  <span className="text-center">
+                                    {(() => {
+                                      const investedTotal = Number((material as any).investedTotal ?? 0) || 0;
+                                      return investedTotal.toFixed(2);
+                                    })()}
+                                  </span>
+                                </div>
+                              </div>
+                            )}
                         </div>
                     </div>
                 )})}
@@ -419,6 +449,14 @@ export function MaterialInventory({ showDescription = true }: { showDescription?
           </div>
         )}
       </div>
+      {isOwner && (
+        <div className="grid grid-cols-1 gap-2 text-sm border rounded-lg p-3 bg-muted/30">
+          <div className="flex items-center justify-between sm:justify-start sm:gap-2">
+            <span className="font-medium">Total Invested</span>
+            <span className="font-mono">{totalInvested.toFixed(2)}</span>
+          </div>
+        </div>
+      )}
       
       {loading ? (
          <div className="space-y-4">

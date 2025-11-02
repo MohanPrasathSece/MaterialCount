@@ -463,11 +463,27 @@ export async function fillStockAction(prevState: any, formData: FormData) {
         if (material) {
           const currentQuantity = material.quantity;
           const newQuantity = currentQuantity + quantityToAdd;
+          // Update stock quantity
           await db.collection("materials").updateOne(
             { _id: new ObjectId(materialId) },
             { $set: { quantity: newQuantity } }
           );
-          
+
+          // Accumulate invested amounts ONLY for manual stock fill (this action)
+          const p = Number((material as any).price ?? 0) || 0;
+          const pp = Number((material as any).pricePerPiece ?? 0) || 0;
+          const pm = Number((material as any).pricePerMeter ?? 0) || 0;
+          const r = Number((material as any).rate ?? 0) || 0;
+          const unitPrice = p > 0 ? p : pp > 0 ? pp : pm > 0 ? pm : r > 0 ? r : 0;
+          const gstPercent = Number((material as any).gstPercent ?? 0) || 0;
+          const base = unitPrice * quantityToAdd;
+          const gst = (base * gstPercent) / 100;
+          const total = base + gst;
+          await db.collection("materials").updateOne(
+            { _id: new ObjectId(materialId) },
+            { $inc: { investedBase: base, investedGst: gst, investedTotal: total } }
+          );
+
           historyItems.push({
             materialId,
             materialName: material.name,

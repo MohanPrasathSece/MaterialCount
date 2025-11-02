@@ -12,6 +12,9 @@ export type Material = {
   rate?: number;       // Optional per-unit rate for costing.
   gstPercent?: number; // Optional GST percentage for this material.
   price?: number;      // Optional unified price for this material.
+  investedBase?: number; // Accumulated base investment from manual stock additions only.
+  investedGst?: number;  // Accumulated GST portion from manual stock additions only.
+  investedTotal?: number; // Accumulated total (base + GST) from manual stock additions only.
 };
 
 // Defines the structure for a client.
