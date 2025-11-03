@@ -61,7 +61,17 @@ export function MaterialInventory({ showDescription = true }: { showDescription?
   }, [setState, lastSetSubmission, toast]);
 
   const totalInvested = useMemo(() => {
-    return (materials || []).reduce((sum, m) => sum + (Number((m as any).investedTotal ?? 0) || 0), 0);
+    return (materials || []).reduce((sum, m) => {
+      const p = Number((m as any).price ?? 0) || 0;
+      const pp = Number((m as any).pricePerPiece ?? 0) || 0;
+      const pm = Number((m as any).pricePerMeter ?? 0) || 0;
+      const r = Number((m as any).rate ?? 0) || 0;
+      const unitPrice = p > 0 ? p : pp > 0 ? pp : pm > 0 ? pm : r > 0 ? r : 0;
+      const gstPercent = Number((m as any).gstPercent ?? 0) || 0;
+      const base = unitPrice * Number(m.quantity || 0);
+      const gst = (base * gstPercent) / 100;
+      return sum + base + gst;
+    }, 0);
   }, [materials]);
 
   const totalGST = useMemo(() => {
@@ -265,8 +275,15 @@ export function MaterialInventory({ showDescription = true }: { showDescription?
                                 {isOwner && (
                                   <TableCell className="text-center">
                                     {(() => {
-                                      const investedTotal = Number((material as any).investedTotal ?? 0) || 0;
-                                      return investedTotal.toFixed(2);
+                                      const p = Number((material as any).price ?? 0) || 0;
+                                      const pp = Number((material as any).pricePerPiece ?? 0) || 0;
+                                      const pm = Number((material as any).pricePerMeter ?? 0) || 0;
+                                      const r = Number((material as any).rate ?? 0) || 0;
+                                      const unitPrice = p > 0 ? p : pp > 0 ? pp : pm > 0 ? pm : r > 0 ? r : 0;
+                                      const gstPercent = Number(material.gstPercent ?? 0) || 0;
+                                      const base = unitPrice * Number(material.quantity || 0);
+                                      const gst = (base * gstPercent) / 100;
+                                      return (base + gst).toFixed(2);
                                     })()}
                                   </TableCell>
                                 )}
@@ -410,8 +427,15 @@ export function MaterialInventory({ showDescription = true }: { showDescription?
                                   <span className="text-sm">Invested</span>
                                   <span className="text-center">
                                     {(() => {
-                                      const investedTotal = Number((material as any).investedTotal ?? 0) || 0;
-                                      return investedTotal.toFixed(2);
+                                      const p = Number((material as any).price ?? 0) || 0;
+                                      const pp = Number((material as any).pricePerPiece ?? 0) || 0;
+                                      const pm = Number((material as any).pricePerMeter ?? 0) || 0;
+                                      const r = Number((material as any).rate ?? 0) || 0;
+                                      const unitPrice = p > 0 ? p : pp > 0 ? pp : pm > 0 ? pm : r > 0 ? r : 0;
+                                      const gstPercent = Number(material.gstPercent ?? 0) || 0;
+                                      const base = unitPrice * Number(material.quantity || 0);
+                                      const gst = (base * gstPercent) / 100;
+                                      return (base + gst).toFixed(2);
                                     })()}
                                   </span>
                                 </div>
