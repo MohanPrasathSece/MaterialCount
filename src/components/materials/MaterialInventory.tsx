@@ -47,6 +47,7 @@ export function MaterialInventory({ showDescription = true }: { showDescription?
   const qtyTimers = useRef<Record<string, any>>({});
   const priceTimers = useRef<Record<string, any>>({});
   const priceDraft = useRef<Record<string, { price?: string; gst?: string }>>({});
+  const [draftTick, setDraftTick] = useState(0);
 
   
 
@@ -62,17 +63,21 @@ export function MaterialInventory({ showDescription = true }: { showDescription?
 
   const totalInvested = useMemo(() => {
     return (materials || []).reduce((sum, m) => {
-      const p = Number((m as any).price ?? 0) || 0;
+      const draft = priceDraft.current[m.id] || {};
+      const draftPrice = draft.price !== undefined && draft.price !== "" ? Number(draft.price) : undefined;
+      const unitPriceSource = draftPrice !== undefined ? draftPrice : (Number((m as any).price ?? 0) || 0);
       const pp = Number((m as any).pricePerPiece ?? 0) || 0;
       const pm = Number((m as any).pricePerMeter ?? 0) || 0;
       const r = Number((m as any).rate ?? 0) || 0;
-      const unitPrice = p > 0 ? p : pp > 0 ? pp : pm > 0 ? pm : r > 0 ? r : 0;
-      const gstPercent = Number((m as any).gstPercent ?? 0) || 0;
-      const base = unitPrice * Number(m.quantity || 0);
+      const unitPrice = unitPriceSource > 0 ? unitPriceSource : pp > 0 ? pp : pm > 0 ? pm : r > 0 ? r : 0;
+      const gstDraft = draft.gst !== undefined && draft.gst !== "" ? Number(draft.gst) : undefined;
+      const gstPercent = (gstDraft !== undefined ? gstDraft : Number((m as any).gstPercent ?? 0)) || 0;
+      const qty = qtyDraft.current[m.id] !== undefined ? Number(qtyDraft.current[m.id] || 0) : Number(m.quantity || 0);
+      const base = unitPrice * qty;
       const gst = (base * gstPercent) / 100;
       return sum + base + gst;
     }, 0);
-  }, [materials]);
+  }, [materials, draftTick]);
 
   const totalGST = useMemo(() => {
     return (materials || []).reduce((sum, m) => sum + (Number((m as any).investedGst ?? 0) || 0), 0);
@@ -80,6 +85,7 @@ export function MaterialInventory({ showDescription = true }: { showDescription?
 
   const handleQtyInputChange = (materialId: string, value: number, formEl: HTMLFormElement | null) => {
     qtyDraft.current[materialId] = value;
+    setDraftTick((t) => t + 1);
     if (!formEl) return;
     if (qtyTimers.current[materialId]) clearTimeout(qtyTimers.current[materialId]);
     qtyTimers.current[materialId] = setTimeout(() => {
@@ -227,6 +233,7 @@ export function MaterialInventory({ showDescription = true }: { showDescription?
                                             ...(priceDraft.current[material.id] || {}),
                                             price: v,
                                           };
+                                          setDraftTick((t) => t + 1);
                                           if (priceTimers.current[material.id+"_price"]) clearTimeout(priceTimers.current[material.id+"_price"]);
                                           priceTimers.current[material.id+"_price"] = setTimeout(() => {
                                             const raw = priceDraft.current[material.id]?.price ?? '';
@@ -260,6 +267,7 @@ export function MaterialInventory({ showDescription = true }: { showDescription?
                                             ...(priceDraft.current[material.id] || {}),
                                             gst: e.target.value,
                                           };
+                                          setDraftTick((t) => t + 1);
                                           if (priceTimers.current[material.id+"_gst"]) clearTimeout(priceTimers.current[material.id+"_gst"]);
                                           priceTimers.current[material.id+"_gst"] = setTimeout(() => {
                                             if (priceDraft.current[material.id]?.gst === '') return;
@@ -275,13 +283,17 @@ export function MaterialInventory({ showDescription = true }: { showDescription?
                                 {isOwner && (
                                   <TableCell className="text-center">
                                     {(() => {
-                                      const p = Number((material as any).price ?? 0) || 0;
+                                      const draft = priceDraft.current[material.id] || {};
+                                      const draftPrice = draft.price !== undefined && draft.price !== "" ? Number(draft.price) : undefined;
+                                      const unitPriceSource = draftPrice !== undefined ? draftPrice : (Number((material as any).price ?? 0) || 0);
                                       const pp = Number((material as any).pricePerPiece ?? 0) || 0;
                                       const pm = Number((material as any).pricePerMeter ?? 0) || 0;
                                       const r = Number((material as any).rate ?? 0) || 0;
-                                      const unitPrice = p > 0 ? p : pp > 0 ? pp : pm > 0 ? pm : r > 0 ? r : 0;
-                                      const gstPercent = Number(material.gstPercent ?? 0) || 0;
-                                      const base = unitPrice * Number(material.quantity || 0);
+                                      const unitPrice = unitPriceSource > 0 ? unitPriceSource : pp > 0 ? pp : pm > 0 ? pm : r > 0 ? r : 0;
+                                      const gstDraft = draft.gst !== undefined && draft.gst !== "" ? Number(draft.gst) : undefined;
+                                      const gstPercent = (gstDraft !== undefined ? gstDraft : Number(material.gstPercent ?? 0)) || 0;
+                                      const qty = qtyDraft.current[material.id] !== undefined ? Number(qtyDraft.current[material.id] || 0) : Number(material.quantity || 0);
+                                      const base = unitPrice * qty;
                                       const gst = (base * gstPercent) / 100;
                                       return (base + gst).toFixed(2);
                                     })()}
@@ -427,13 +439,17 @@ export function MaterialInventory({ showDescription = true }: { showDescription?
                                   <span className="text-sm">Invested</span>
                                   <span className="text-center">
                                     {(() => {
-                                      const p = Number((material as any).price ?? 0) || 0;
+                                      const draft = priceDraft.current[material.id] || {};
+                                      const draftPrice = draft.price !== undefined && draft.price !== "" ? Number(draft.price) : undefined;
+                                      const unitPriceSource = draftPrice !== undefined ? draftPrice : (Number((material as any).price ?? 0) || 0);
                                       const pp = Number((material as any).pricePerPiece ?? 0) || 0;
                                       const pm = Number((material as any).pricePerMeter ?? 0) || 0;
                                       const r = Number((material as any).rate ?? 0) || 0;
-                                      const unitPrice = p > 0 ? p : pp > 0 ? pp : pm > 0 ? pm : r > 0 ? r : 0;
-                                      const gstPercent = Number(material.gstPercent ?? 0) || 0;
-                                      const base = unitPrice * Number(material.quantity || 0);
+                                      const unitPrice = unitPriceSource > 0 ? unitPriceSource : pp > 0 ? pp : pm > 0 ? pm : r > 0 ? r : 0;
+                                      const gstDraft = draft.gst !== undefined && draft.gst !== "" ? Number(draft.gst) : undefined;
+                                      const gstPercent = (gstDraft !== undefined ? gstDraft : Number(material.gstPercent ?? 0)) || 0;
+                                      const qty = qtyDraft.current[material.id] !== undefined ? Number(qtyDraft.current[material.id] || 0) : Number(material.quantity || 0);
+                                      const base = unitPrice * qty;
                                       const gst = (base * gstPercent) / 100;
                                       return (base + gst).toFixed(2);
                                     })()}
@@ -503,6 +519,14 @@ export function MaterialInventory({ showDescription = true }: { showDescription?
                 }
                 return null;
             })}
+            {isOwner && (
+              <div className="mt-4 grid grid-cols-1 gap-2 text-sm border rounded-lg p-3 bg-muted/30">
+                <div className="flex items-center justify-between sm:justify-start sm:gap-2">
+                  <span className="font-medium">Total Invested</span>
+                  <span className="font-mono">{totalInvested.toFixed(2)}</span>
+                </div>
+              </div>
+            )}
         </div>
       ) : (
         <div className="border rounded-lg">
